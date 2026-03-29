@@ -149,6 +149,7 @@ import {
   shouldUseCompactComposerFooter,
 } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { useSidePanelStore } from "../sidePanelStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -1570,7 +1571,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const sidePanelOpen = useSidePanelStore((s) => s.open);
+  const setSidePanelOpen = useSidePanelStore((s) => s.setOpen);
+  const rawToggleSidePanel = useSidePanelStore((s) => s.toggle);
+
   const onToggleDiff = useCallback(() => {
+    // Close side panel when opening diff — they shouldn't both be visible
+    if (!diffOpen && sidePanelOpen) {
+      setSidePanelOpen(false);
+    }
     void navigate({
       to: "/$threadId",
       params: { threadId },
@@ -1580,7 +1589,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
       },
     });
-  }, [diffOpen, navigate, threadId]);
+  }, [diffOpen, sidePanelOpen, setSidePanelOpen, navigate, threadId]);
+
+  const toggleSidePanel = useCallback(() => {
+    // Close diff panel when opening side panel
+    if (!sidePanelOpen && diffOpen) {
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+        replace: true,
+        search: (previous) => {
+          const rest = stripDiffSearchParams(previous);
+          return { ...rest, diff: undefined };
+        },
+      });
+    }
+    rawToggleSidePanel();
+  }, [sidePanelOpen, diffOpen, rawToggleSidePanel, navigate, threadId]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3952,6 +3977,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          sidePanelOpen={sidePanelOpen}
+          onToggleSidePanel={toggleSidePanel}
         />
       </header>
 
