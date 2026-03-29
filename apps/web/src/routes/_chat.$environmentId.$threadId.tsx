@@ -20,14 +20,20 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
+import { useSidePanelStore } from "../sidePanelStore";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
+const SidePanel = lazy(() => import("../components/SidePanel"));
+
 const DIFF_INLINE_LAYOUT_MEDIA_QUERY = "(max-width: 1180px)";
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
 const DIFF_INLINE_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
 const DIFF_INLINE_SIDEBAR_MIN_WIDTH = 26 * 16;
+const SIDE_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_side_panel_sidebar_width";
+const SIDE_PANEL_INLINE_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
+const SIDE_PANEL_INLINE_SIDEBAR_MIN_WIDTH = 26 * 16;
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
 
 const DiffPanelSheet = (props: {
@@ -41,6 +47,32 @@ const DiffPanelSheet = (props: {
       onOpenChange={(open) => {
         if (!open) {
           props.onCloseDiff();
+        }
+      }}
+    >
+      <SheetPopup
+        side="right"
+        showCloseButton={false}
+        keepMounted
+        className="w-[min(88vw,820px)] max-w-[820px] p-0"
+      >
+        {props.children}
+      </SheetPopup>
+    </Sheet>
+  );
+};
+
+const SidePanelSheet = (props: {
+  children: ReactNode;
+  sidePanelOpen: boolean;
+  onCloseSidePanel: () => void;
+}) => {
+  return (
+    <Sheet
+      open={props.sidePanelOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          props.onCloseSidePanel();
         }
       }}
     >
@@ -71,6 +103,26 @@ const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
         <DiffPanel mode={props.mode} />
       </Suspense>
     </DiffWorkerPoolProvider>
+  );
+};
+
+const SidePanelLoadingFallback = () => {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      Loading...
+    </div>
+  );
+};
+
+const LazySidePanel = (props: {
+  layout: "sidebar" | "sheet";
+  projectId: string | null;
+  threadId: string | null;
+}) => {
+  return (
+    <Suspense fallback={<SidePanelLoadingFallback />}>
+      <SidePanel layout={props.layout} projectId={props.projectId} threadId={props.threadId} />
+    </Suspense>
   );
 };
 
@@ -162,6 +214,59 @@ const DiffPanelInlineSidebar = (props: {
   );
 };
 
+const SidePanelInlineSidebar = (props: {
+  sidePanelOpen: boolean;
+  onCloseSidePanel: () => void;
+  onOpenSidePanel: () => void;
+  renderSidePanelContent: boolean;
+  projectId: string | null;
+  threadId: string | null;
+}) => {
+  const {
+    sidePanelOpen,
+    onCloseSidePanel,
+    onOpenSidePanel,
+    renderSidePanelContent,
+    projectId,
+    threadId,
+  } = props;
+  const onOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        onOpenSidePanel();
+        return;
+      }
+      onCloseSidePanel();
+    },
+    [onCloseSidePanel, onOpenSidePanel],
+  );
+
+  return (
+    <SidebarProvider
+      defaultOpen={false}
+      open={sidePanelOpen}
+      onOpenChange={onOpenChange}
+      className="w-auto min-h-0 flex-none bg-transparent"
+      style={{ "--sidebar-width": SIDE_PANEL_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
+    >
+      <Sidebar
+        side="right"
+        collapsible="offcanvas"
+        className="border-l border-border bg-card text-foreground"
+        resizable={{
+          minWidth: SIDE_PANEL_INLINE_SIDEBAR_MIN_WIDTH,
+          storageKey: SIDE_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
+        }}
+      >
+        {renderSidePanelContent ? (
+          <LazySidePanel layout="sidebar" projectId={projectId} threadId={threadId} />
+        ) : null}
+        <SidebarRail />
+      </Sidebar>
+    </SidebarProvider>
+  );
+};
+
 function ChatThreadRouteView() {
   const navigate = useNavigate();
   const threadRef = Route.useParams({
@@ -213,6 +318,15 @@ function ChatThreadRouteView() {
       };
     });
   }, [currentThreadKey]);
+
+  const projectId = serverThread?.projectId ?? draftThread?.projectId ?? null;
+
+  const sidePanelOpen = useSidePanelStore((s) => s.open);
+  const setSidePanelOpen = useSidePanelStore((s) => s.setOpen);
+  const shouldUseSidePanelSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
+
+  const [hasOpenedSidePanel, setHasOpenedSidePanel] = useState(sidePanelOpen);
+
   const closeDiff = useCallback(() => {
     if (!threadRef) {
       return;
@@ -238,6 +352,19 @@ function ChatThreadRouteView() {
     });
   }, [markDiffOpened, navigate, threadRef]);
 
+  const closeSidePanel = useCallback(() => {
+    setSidePanelOpen(false);
+  }, [setSidePanelOpen]);
+  const openSidePanel = useCallback(() => {
+    setSidePanelOpen(true);
+  }, [setSidePanelOpen]);
+
+  useEffect(() => {
+    if (sidePanelOpen) {
+      setHasOpenedSidePanel(true);
+    }
+  }, [sidePanelOpen]);
+
   useEffect(() => {
     if (!threadRef || !bootstrapComplete) {
       return;
@@ -260,6 +387,7 @@ function ChatThreadRouteView() {
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
+  const shouldRenderSidePanelContent = sidePanelOpen || hasOpenedSidePanel;
 
   if (!shouldUseDiffSheet) {
     return (
@@ -279,6 +407,27 @@ function ChatThreadRouteView() {
           onOpenDiff={openDiff}
           renderDiffContent={shouldRenderDiffContent}
         />
+        {!shouldUseSidePanelSheet && (
+          <SidePanelInlineSidebar
+            sidePanelOpen={sidePanelOpen}
+            onCloseSidePanel={closeSidePanel}
+            onOpenSidePanel={openSidePanel}
+            renderSidePanelContent={shouldRenderSidePanelContent}
+            projectId={projectId}
+            threadId={threadRef.threadId}
+          />
+        )}
+        {shouldUseSidePanelSheet && (
+          <SidePanelSheet sidePanelOpen={sidePanelOpen} onCloseSidePanel={closeSidePanel}>
+            {shouldRenderSidePanelContent ? (
+              <LazySidePanel
+                layout="sheet"
+                projectId={projectId}
+                threadId={threadRef.threadId}
+              />
+            ) : null}
+          </SidePanelSheet>
+        )}
       </>
     );
   }
@@ -296,6 +445,11 @@ function ChatThreadRouteView() {
       <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
         {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
       </DiffPanelSheet>
+      <SidePanelSheet sidePanelOpen={sidePanelOpen} onCloseSidePanel={closeSidePanel}>
+        {shouldRenderSidePanelContent ? (
+          <LazySidePanel layout="sheet" projectId={projectId} threadId={threadRef.threadId} />
+        ) : null}
+      </SidePanelSheet>
     </>
   );
 }

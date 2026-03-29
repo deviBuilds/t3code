@@ -130,6 +130,7 @@ import {
   type TerminalContextSelection,
 } from "../lib/terminalContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { useSidePanelStore } from "../sidePanelStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -1455,12 +1456,19 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const sidePanelOpen = useSidePanelStore((s) => s.open);
+  const setSidePanelOpen = useSidePanelStore((s) => s.setOpen);
+  const rawToggleSidePanel = useSidePanelStore((s) => s.toggle);
+
   const onToggleDiff = useCallback(() => {
     if (!isServerThread) {
       return;
     }
     if (!diffOpen) {
       onDiffPanelOpen?.();
+      if (sidePanelOpen) {
+        setSidePanelOpen(false);
+      }
     }
     void navigate({
       to: "/$environmentId/$threadId",
@@ -1474,7 +1482,22 @@ export default function ChatView(props: ChatViewProps) {
         return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
       },
     });
-  }, [diffOpen, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
+  }, [diffOpen, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId, sidePanelOpen, setSidePanelOpen]);
+
+  const toggleSidePanel = useCallback(() => {
+    if (!sidePanelOpen && diffOpen) {
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId, threadId },
+        replace: true,
+        search: (previous) => {
+          const rest = stripDiffSearchParams(previous);
+          return { ...rest, diff: undefined };
+        },
+      });
+    }
+    rawToggleSidePanel();
+  }, [sidePanelOpen, diffOpen, rawToggleSidePanel, navigate, environmentId, threadId]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3222,6 +3245,8 @@ export default function ChatView(props: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          sidePanelOpen={sidePanelOpen}
+          onToggleSidePanel={toggleSidePanel}
         />
       </header>
 
