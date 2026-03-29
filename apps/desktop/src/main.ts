@@ -124,6 +124,8 @@ const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
 const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
+const DESKTOP_WINDOW_BACKGROUND_LIGHT = "#ffffff";
+const DESKTOP_WINDOW_BACKGROUND_DARK = "#161616";
 
 type WindowTitleBarOptions = Pick<
   BrowserWindowConstructorOptions,
@@ -471,6 +473,27 @@ function ensureInitialBackendWindowOpen(): void {
 
   backendInitialWindowOpenInFlight = nextOpen;
 }
+
+function getDesktopWindowBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors
+    ? DESKTOP_WINDOW_BACKGROUND_DARK
+    : DESKTOP_WINDOW_BACKGROUND_LIGHT;
+}
+
+function applyDesktopWindowBackground(window: BrowserWindow): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  window.setBackgroundColor(getDesktopWindowBackgroundColor());
+}
+
+function syncAllDesktopWindowBackgrounds(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    applyDesktopWindowBackground(window);
+  }
+}
+
 
 function writeDesktopStreamChunk(
   streamName: "stdout" | "stderr",
@@ -1630,6 +1653,7 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
+    syncAllDesktopWindowBackgrounds();
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
@@ -1817,6 +1841,7 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     backgroundColor: getInitialWindowBackgroundColor(),
     ...getIconOption(),
+    backgroundColor: getDesktopWindowBackgroundColor(),
     title: APP_DISPLAY_NAME,
     ...getWindowTitleBarOptions(),
     webPreferences: {
@@ -2009,6 +2034,7 @@ app
     configureAppIdentity();
     configureApplicationMenu();
     registerDesktopProtocol();
+    nativeTheme.on("updated", syncAllDesktopWindowBackgrounds);
     configureAutoUpdater();
     void bootstrap().catch((error) => {
       if (isBackendReadinessAborted(error) && isQuitting) {
