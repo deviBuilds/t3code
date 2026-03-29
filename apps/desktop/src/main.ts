@@ -82,6 +82,8 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
+const DESKTOP_WINDOW_BACKGROUND_LIGHT = "#ffffff";
+const DESKTOP_WINDOW_BACKGROUND_DARK = "#161616";
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type LinuxDesktopNamedApp = Electron.App & {
@@ -196,6 +198,26 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   }
 
   return null;
+}
+
+function getDesktopWindowBackgroundColor(): string {
+  return nativeTheme.shouldUseDarkColors
+    ? DESKTOP_WINDOW_BACKGROUND_DARK
+    : DESKTOP_WINDOW_BACKGROUND_LIGHT;
+}
+
+function applyDesktopWindowBackground(window: BrowserWindow): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  window.setBackgroundColor(getDesktopWindowBackgroundColor());
+}
+
+function syncAllDesktopWindowBackgrounds(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    applyDesktopWindowBackground(window);
+  }
 }
 
 function writeDesktopStreamChunk(
@@ -1204,6 +1226,7 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
+    syncAllDesktopWindowBackgrounds();
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
@@ -1346,6 +1369,7 @@ function createWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     ...getIconOption(),
+    backgroundColor: getDesktopWindowBackgroundColor(),
     title: APP_DISPLAY_NAME,
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 18 },
@@ -1466,6 +1490,7 @@ app
     configureAppIdentity();
     configureApplicationMenu();
     registerDesktopProtocol();
+    nativeTheme.on("updated", syncAllDesktopWindowBackgrounds);
     configureAutoUpdater();
     void bootstrap().catch((error) => {
       handleFatalStartupError("bootstrap", error);
