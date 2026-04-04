@@ -17,6 +17,7 @@ import { resolveShortcutCommand } from "../keybindings";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useWorkspaceThreadTerminalOpen } from "../workspace/store";
 import { useFocusedWorkspaceSurface, useWorkspaceStore } from "../workspace/store";
+import { useSidebar } from "~/components/ui/sidebar";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
@@ -32,6 +33,7 @@ function ChatRouteGlobalShortcuts() {
   const keybindings = useServerKeybindings();
   const terminalOpen = useWorkspaceThreadTerminalOpen(routeThreadRef);
   const appSettings = useSettings();
+  const { toggleSidebar } = useSidebar();
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -131,6 +133,27 @@ function ChatRouteGlobalShortcuts() {
     terminalOpen,
     appSettings.defaultThreadEnvMode,
   ]);
+
+  useEffect(() => {
+    const onSidebarToggleCapture = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: {
+          terminalFocus: isTerminalFocused(),
+          terminalOpen,
+        },
+      });
+      if (command === "sidebar.toggle") {
+        event.preventDefault();
+        toggleSidebar();
+      }
+    };
+
+    window.addEventListener("keydown", onSidebarToggleCapture, true);
+    return () => {
+      window.removeEventListener("keydown", onSidebarToggleCapture, true);
+    };
+  }, [keybindings, terminalOpen, toggleSidebar]);
 
   return null;
 }

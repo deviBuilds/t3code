@@ -33,6 +33,7 @@ interface ChatHeaderProps {
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
   diffToggleShortcutLabel: string | null;
+  sidebarToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
   sidePanelOpen: boolean;
@@ -61,6 +62,7 @@ export const ChatHeader = memo(function ChatHeader({
   terminalOpen,
   terminalToggleShortcutLabel,
   diffToggleShortcutLabel,
+  sidebarToggleShortcutLabel,
   gitCwd,
   diffOpen,
   sidePanelOpen,
@@ -75,7 +77,14 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <Tooltip>
+          <TooltipTrigger render={<SidebarTrigger className="size-7 shrink-0" />} />
+          <TooltipPopup side="bottom">
+            {sidebarToggleShortcutLabel
+              ? `Toggle sidebar (${sidebarToggleShortcutLabel})`
+              : "Toggle sidebar"}
+          </TooltipPopup>
+        </Tooltip>
         <h2
           className="min-w-0 shrink truncate text-sm font-medium text-foreground"
           title={activeThreadTitle}
