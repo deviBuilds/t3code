@@ -175,6 +175,12 @@ code {
   -webkit-app-region: drag;
 }
 
+/* When the main sidebar is collapsed on electron/macOS, pad the header to
+   clear the traffic-light window controls. */
+[data-slot="sidebar-wrapper"]:has(> [data-slot="sidebar"][data-state="collapsed"]) [data-slot="sidebar-inset"] .drag-region {
+  padding-left: 90px;
+}
+
 .drag-region button,
 .drag-region input,
 .drag-region textarea,

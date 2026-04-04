@@ -1456,6 +1456,10 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const sidebarToggleShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "sidebar.toggle", nonTerminalShortcutLabelOptions),
+    [keybindings, nonTerminalShortcutLabelOptions],
+  );
   const sidePanelOpen = useSidePanelStore((s) => s.open);
   const setSidePanelOpen = useSidePanelStore((s) => s.setOpen);
   const rawToggleSidePanel = useSidePanelStore((s) => s.toggle);
@@ -3199,7 +3203,6 @@ export default function ChatView(props: ChatViewProps) {
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
 
-  // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
   }
@@ -3237,6 +3240,7 @@ export default function ChatView(props: ChatViewProps) {
           terminalOpen={terminalState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
+          sidebarToggleShortcutLabel={sidebarToggleShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
           onRunProjectScript={runProjectScript}
