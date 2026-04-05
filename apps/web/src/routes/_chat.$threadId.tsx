@@ -112,10 +112,14 @@ const SidePanelLoadingFallback = () => {
   );
 };
 
-const LazySidePanel = (props: { layout: "sidebar" | "sheet"; projectId: string | null }) => {
+const LazySidePanel = (props: {
+  layout: "sidebar" | "sheet";
+  projectId: string | null;
+  threadId: string | null;
+}) => {
   return (
     <Suspense fallback={<SidePanelLoadingFallback />}>
-      <SidePanel layout={props.layout} projectId={props.projectId} />
+      <SidePanel layout={props.layout} projectId={props.projectId} threadId={props.threadId} />
     </Suspense>
   );
 };
@@ -214,9 +218,16 @@ const SidePanelInlineSidebar = (props: {
   onOpenSidePanel: () => void;
   renderSidePanelContent: boolean;
   projectId: string | null;
+  threadId: string | null;
 }) => {
-  const { sidePanelOpen, onCloseSidePanel, onOpenSidePanel, renderSidePanelContent, projectId } =
-    props;
+  const {
+    sidePanelOpen,
+    onCloseSidePanel,
+    onOpenSidePanel,
+    renderSidePanelContent,
+    projectId,
+    threadId,
+  } = props;
   const onOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -245,7 +256,9 @@ const SidePanelInlineSidebar = (props: {
           storageKey: SIDE_PANEL_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        {renderSidePanelContent ? <LazySidePanel layout="sidebar" projectId={projectId} /> : null}
+        {renderSidePanelContent ? (
+          <LazySidePanel layout="sidebar" projectId={projectId} threadId={threadId} />
+        ) : null}
         <SidebarRail />
       </Sidebar>
     </SidebarProvider>
@@ -357,12 +370,13 @@ function ChatThreadRouteView() {
             onOpenSidePanel={openSidePanel}
             renderSidePanelContent={shouldRenderSidePanelContent}
             projectId={projectId}
+            threadId={threadId}
           />
         )}
         {shouldUseSidePanelSheet && (
           <SidePanelSheet sidePanelOpen={sidePanelOpen} onCloseSidePanel={closeSidePanel}>
             {shouldRenderSidePanelContent ? (
-              <LazySidePanel layout="sheet" projectId={projectId} />
+              <LazySidePanel layout="sheet" projectId={projectId} threadId={threadId} />
             ) : null}
           </SidePanelSheet>
         )}
@@ -380,7 +394,7 @@ function ChatThreadRouteView() {
       </DiffPanelSheet>
       <SidePanelSheet sidePanelOpen={sidePanelOpen} onCloseSidePanel={closeSidePanel}>
         {shouldRenderSidePanelContent ? (
-          <LazySidePanel layout="sheet" projectId={projectId} />
+          <LazySidePanel layout="sheet" projectId={projectId} threadId={threadId} />
         ) : null}
       </SidePanelSheet>
     </>

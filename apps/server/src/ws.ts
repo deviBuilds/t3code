@@ -11,6 +11,8 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProjectListEntriesError,
+  ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
@@ -536,6 +538,36 @@ const WsRpcLayer = WsRpcGroup.toLayer(
                   cause,
                 }),
             ),
+          ),
+          { "rpc.aggregate": "workspace" },
+        ),
+      [WS_METHODS.projectsListEntries]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.projectsListEntries,
+          workspaceEntries.list(input).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProjectListEntriesError({
+                  message: `Failed to list workspace entries: ${cause.detail}`,
+                  cause,
+                }),
+            ),
+          ),
+          { "rpc.aggregate": "workspace" },
+        ),
+      [WS_METHODS.projectsReadFile]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.projectsReadFile,
+          workspaceFileSystem.readFile(input).pipe(
+            Effect.mapError((cause) => {
+              const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+                ? "File path must stay within the project root."
+                : "Failed to read workspace file";
+              return new ProjectReadFileError({
+                message,
+                cause,
+              });
+            }),
           ),
           { "rpc.aggregate": "workspace" },
         ),

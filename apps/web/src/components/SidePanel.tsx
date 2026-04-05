@@ -2,24 +2,19 @@ import { lazy, memo, Suspense, useCallback, useEffect } from "react";
 import { GlobeIcon, CodeXmlIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { isElectron } from "~/env";
-import { selectProjectTabs, selectProjectActiveTabId, useSidePanelStore } from "~/sidePanelStore";
+import {
+  selectProjectTabs,
+  selectProjectActiveTabId,
+  selectProjectEditorTabs,
+  selectProjectActiveEditorTabId,
+  useSidePanelStore,
+} from "~/sidePanelStore";
+import { useEditorCwd } from "~/hooks/useEditorCwd";
 import { BrowserTabBar } from "./BrowserPanel";
+import { EditorTabBar } from "./editor/EditorTabBar";
 
 const BrowserPanel = lazy(() => import("./BrowserPanel"));
-
-// ── Editor Placeholder ──────────────────────────────────────────────────
-
-const EditorPlaceholder = memo(function EditorPlaceholder() {
-  return (
-    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-      <div className="flex flex-col items-center gap-3">
-        <CodeXmlIcon className="size-10 opacity-30" />
-        <span className="font-medium">Editor</span>
-        <span className="text-xs opacity-60">Coming soon</span>
-      </div>
-    </div>
-  );
-});
+const EditorPanel = lazy(() => import("./EditorPanel"));
 
 // ── Loading Fallback ────────────────────────────────────────────────────
 
@@ -31,11 +26,27 @@ const BrowserLoadingFallback = memo(function BrowserLoadingFallback() {
   );
 });
 
+const EditorLoadingFallback = memo(function EditorLoadingFallback() {
+  return (
+    <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+      Loading editor...
+    </div>
+  );
+});
+
 // ── Main SidePanel ──────────────────────────────────────────────────────
 
 export type SidePanelLayout = "sidebar" | "sheet";
 
-function SidePanel({ layout, projectId }: { layout: SidePanelLayout; projectId: string | null }) {
+function SidePanel({
+  layout,
+  projectId,
+  threadId,
+}: {
+  layout: SidePanelLayout;
+  projectId: string | null;
+  threadId: string | null;
+}) {
   const mode = useSidePanelStore((s) => s.mode);
   const setMode = useSidePanelStore((s) => s.setMode);
   const setActiveProjectId = useSidePanelStore((s) => s.setActiveProjectId);
@@ -44,6 +55,15 @@ function SidePanel({ layout, projectId }: { layout: SidePanelLayout; projectId: 
   const setActiveTab = useSidePanelStore((s) => s.setActiveTab);
   const closeTab = useSidePanelStore((s) => s.closeTab);
   const addTab = useSidePanelStore((s) => s.addTab);
+
+  // Editor state
+  const editorTabs = useSidePanelStore(selectProjectEditorTabs);
+  const activeEditorTabId = useSidePanelStore(selectProjectActiveEditorTabId);
+  const setActiveEditorTab = useSidePanelStore((s) => s.setActiveEditorTab);
+  const closeEditorTab = useSidePanelStore((s) => s.closeEditorTab);
+  const pinEditorTab = useSidePanelStore((s) => s.pinEditorTab);
+
+  const editorCwd = useEditorCwd(projectId, threadId);
 
   useEffect(() => {
     setActiveProjectId(projectId);
@@ -59,7 +79,7 @@ function SidePanel({ layout, projectId }: { layout: SidePanelLayout; projectId: 
       )}
     >
       {/*
-        Single top row: mode-switch icons + tabs (browser) or just icons (editor).
+        Single top row: mode-switch icons + tabs (browser) or editor tabs.
         The icons never change DOM position — no jump when switching modes.
       */}
       <div
@@ -108,6 +128,17 @@ function SidePanel({ layout, projectId }: { layout: SidePanelLayout; projectId: 
             onAddTab={handleAddTab}
           />
         )}
+
+        {/* Editor tabs — inline, same row */}
+        {mode === "editor" && (
+          <EditorTabBar
+            tabs={editorTabs}
+            activeTabId={activeEditorTabId}
+            onActivate={setActiveEditorTab}
+            onClose={closeEditorTab}
+            onPin={pinEditorTab}
+          />
+        )}
       </div>
 
       {/* Browser mode — always mounted to keep webviews alive */}
@@ -119,7 +150,9 @@ function SidePanel({ layout, projectId }: { layout: SidePanelLayout; projectId: 
 
       {/* Editor mode */}
       <div className={cn("flex min-h-0 flex-1 flex-col", mode === "editor" ? "flex" : "hidden")}>
-        <EditorPlaceholder />
+        <Suspense fallback={<EditorLoadingFallback />}>
+          <EditorPanel cwd={editorCwd} />
+        </Suspense>
       </div>
     </div>
   );
