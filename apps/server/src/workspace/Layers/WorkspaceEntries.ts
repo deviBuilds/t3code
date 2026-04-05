@@ -414,8 +414,34 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const list: WorkspaceEntriesShape["list"] = Effect.fn("WorkspaceEntries.list")(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+      Effect.map((index) => {
+        const limit = Math.max(0, Math.floor(input.limit));
+        const sorted = [...index.entries].toSorted((a, b) => {
+          if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
+          return a.path.localeCompare(b.path);
+        });
+        const entries = sorted.slice(0, limit).map((e) => {
+          const result: { path: string; kind: "file" | "directory"; parentPath?: string } = {
+            path: e.path,
+            kind: e.kind,
+          };
+          if (e.parentPath) result.parentPath = e.parentPath;
+          return result;
+        });
+        return {
+          entries,
+          truncated: index.truncated || sorted.length > limit,
+        };
+      }),
+    );
+  });
+
   return {
     invalidate,
+    list,
     search,
   } satisfies WorkspaceEntriesShape;
 });
