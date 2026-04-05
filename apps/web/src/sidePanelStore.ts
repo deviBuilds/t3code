@@ -36,10 +36,23 @@ interface ProjectBrowserState {
   activeTabId: string | null;
 }
 
+export interface EditorTab {
+  id: string;
+  relativePath: string;
+  /** false = "preview" tab (single-click). true = "pinned" tab (double-click). */
+  pinned: boolean;
+}
+
+interface ProjectEditorState {
+  tabs: EditorTab[];
+  activeTabId: string | null;
+}
+
 interface SidePanelState {
   open: boolean;
   mode: SidePanelMode;
   browserStateByProjectId: Record<string, ProjectBrowserState>;
+  editorStateByProjectId: Record<string, ProjectEditorState>;
   favorites: BrowserHistoryEntry[];
   favoriteFolders: FavoriteFolder[];
   history: BrowserHistoryEntry[];
@@ -158,6 +171,37 @@ function nextFolderId(): string {
   return `fav-folder-${Date.now()}-${folderIdCounter}`;
 }
 
+let editorTabIdCounter = 0;
+function nextEditorTabId(): string {
+  editorTabIdCounter += 1;
+  return `editor-tab-${Date.now()}-${editorTabIdCounter}`;
+}
+
+const EMPTY_PROJECT_EDITOR: ProjectEditorState = Object.freeze({
+  tabs: [] as EditorTab[],
+  activeTabId: null,
+});
+
+function getProjectEditor(
+  stateMap: Record<string, ProjectEditorState>,
+  projectId: string | null,
+): ProjectEditorState {
+  if (!projectId) return EMPTY_PROJECT_EDITOR;
+  return stateMap[projectId] ?? EMPTY_PROJECT_EDITOR;
+}
+
+function updateProjectEditorInMap(
+  stateMap: Record<string, ProjectEditorState>,
+  projectId: string | null,
+  updater: (pes: ProjectEditorState) => ProjectEditorState,
+): Record<string, ProjectEditorState> {
+  if (!projectId) return stateMap;
+  const current = getProjectEditor(stateMap, projectId);
+  const next = updater(current);
+  if (next === current) return stateMap;
+  return { ...stateMap, [projectId]: next };
+}
+
 interface SidePanelStore extends SidePanelState {
   activeProjectId: string | null;
   setActiveProjectId: (projectId: string | null) => void;
@@ -190,6 +234,12 @@ interface SidePanelStore extends SidePanelState {
     folderId?: string,
   ) => void;
   removeFavoriteFromFolder: (url: string, folderId: string) => void;
+
+  // Editor actions
+  openEditorFile: (relativePath: string) => void;
+  pinEditorTab: (tabId: string) => void;
+  closeEditorTab: (tabId: string) => void;
+  setActiveEditorTab: (tabId: string) => void;
 }
 
 export const useSidePanelStore = create<SidePanelStore>()(
@@ -198,6 +248,7 @@ export const useSidePanelStore = create<SidePanelStore>()(
       open: false,
       mode: "browser",
       browserStateByProjectId: {},
+      editorStateByProjectId: {},
       favorites: [],
       favoriteFolders: [],
       history: [],
@@ -497,15 +548,110 @@ export const useSidePanelStore = create<SidePanelStore>()(
           ),
         }));
       },
+
+      // ── Editor actions ──────────────────────────────────────────────
+
+      openEditorFile: (relativePath) => {
+        set((s) => {
+          const pes = getProjectEditor(s.editorStateByProjectId, s.activeProjectId);
+          // Check if already open
+          const existing = pes.tabs.find((t) => t.relativePath === relativePath);
+          if (existing) {
+            return {
+              editorStateByProjectId: updateProjectEditorInMap(
+                s.editorStateByProjectId,
+                s.activeProjectId,
+                (p) => ({ ...p, activeTabId: existing.id }),
+              ),
+            };
+          }
+          const id = nextEditorTabId();
+          const newTab: EditorTab = { id, relativePath, pinned: false };
+          // Replace the current unpinned "preview" tab if one exists
+          const activeTab = pes.tabs.find((t) => t.id === pes.activeTabId);
+          if (activeTab && !activeTab.pinned) {
+            return {
+              editorStateByProjectId: updateProjectEditorInMap(
+                s.editorStateByProjectId,
+                s.activeProjectId,
+                (p) => ({
+                  tabs: p.tabs.map((t) => (t.id === activeTab.id ? newTab : t)),
+                  activeTabId: id,
+                }),
+              ),
+            };
+          }
+          // No preview tab — add as new
+          return {
+            editorStateByProjectId: updateProjectEditorInMap(
+              s.editorStateByProjectId,
+              s.activeProjectId,
+              (p) => ({
+                tabs: [...p.tabs, newTab],
+                activeTabId: id,
+              }),
+            ),
+          };
+        });
+      },
+
+      pinEditorTab: (tabId) => {
+        set((s) => ({
+          editorStateByProjectId: updateProjectEditorInMap(
+            s.editorStateByProjectId,
+            s.activeProjectId,
+            (p) => ({
+              ...p,
+              tabs: p.tabs.map((t) => (t.id === tabId ? { ...t, pinned: true } : t)),
+            }),
+          ),
+        }));
+      },
+
+      closeEditorTab: (tabId) => {
+        set((s) => ({
+          editorStateByProjectId: updateProjectEditorInMap(
+            s.editorStateByProjectId,
+            s.activeProjectId,
+            (pes) => {
+              const idx = pes.tabs.findIndex((t) => t.id === tabId);
+              if (idx < 0) return pes;
+              const remaining = pes.tabs.filter((t) => t.id !== tabId);
+              if (remaining.length === 0) return { tabs: [], activeTabId: null };
+              const needsNew = pes.activeTabId === tabId;
+              return {
+                tabs: remaining,
+                activeTabId: needsNew
+                  ? (remaining[Math.min(idx, remaining.length - 1)]?.id ?? null)
+                  : pes.activeTabId,
+              };
+            },
+          ),
+        }));
+      },
+
+      setActiveEditorTab: (tabId) => {
+        set((s) => ({
+          editorStateByProjectId: updateProjectEditorInMap(
+            s.editorStateByProjectId,
+            s.activeProjectId,
+            (pes) => {
+              if (!pes.tabs.some((t) => t.id === tabId)) return pes;
+              return { ...pes, activeTabId: tabId };
+            },
+          ),
+        }));
+      },
     }),
     {
       name: SIDE_PANEL_STORAGE_KEY,
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         open: state.open,
         mode: state.mode,
         browserStateByProjectId: state.browserStateByProjectId,
+        editorStateByProjectId: state.editorStateByProjectId,
         favorites: state.favorites,
         favoriteFolders: state.favoriteFolders,
         history: state.history,
@@ -522,6 +668,9 @@ export const useSidePanelStore = create<SidePanelStore>()(
         const state = (persisted ?? {}) as Record<string, unknown>;
         if (version < 2 || !state["favoriteFolders"]) {
           state["favoriteFolders"] = [];
+        }
+        if (version < 4 || !state["editorStateByProjectId"]) {
+          state["editorStateByProjectId"] = {};
         }
         // Clean stale fields from ancient store versions
         delete state["tabs"];
@@ -558,4 +707,14 @@ export function selectProjectTabs(state: SidePanelStore): BrowserTab[] {
 /** Selector: get active tab id for the active project */
 export function selectProjectActiveTabId(state: SidePanelStore): string | null {
   return getProjectBrowser(state.browserStateByProjectId, state.activeProjectId).activeTabId;
+}
+
+/** Selector: get editor tabs for the active project */
+export function selectProjectEditorTabs(state: SidePanelStore): EditorTab[] {
+  return getProjectEditor(state.editorStateByProjectId, state.activeProjectId).tabs;
+}
+
+/** Selector: get active editor tab id for the active project */
+export function selectProjectActiveEditorTabId(state: SidePanelStore): string | null {
+  return getProjectEditor(state.editorStateByProjectId, state.activeProjectId).activeTabId;
 }

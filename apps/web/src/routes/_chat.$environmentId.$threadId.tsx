@@ -1,5 +1,6 @@
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
 
 import ChatView from "../components/ChatView";
 import { threadHasStarted } from "../components/ChatView.logic";
@@ -116,12 +117,18 @@ const SidePanelLoadingFallback = () => {
 
 const LazySidePanel = (props: {
   layout: "sidebar" | "sheet";
+  environmentId: EnvironmentId | null;
   projectId: string | null;
   threadId: string | null;
 }) => {
   return (
     <Suspense fallback={<SidePanelLoadingFallback />}>
-      <SidePanel layout={props.layout} projectId={props.projectId} threadId={props.threadId} />
+      <SidePanel
+        layout={props.layout}
+        environmentId={props.environmentId}
+        projectId={props.projectId}
+        threadId={props.threadId}
+      />
     </Suspense>
   );
 };
@@ -219,6 +226,7 @@ const SidePanelInlineSidebar = (props: {
   onCloseSidePanel: () => void;
   onOpenSidePanel: () => void;
   renderSidePanelContent: boolean;
+  environmentId: EnvironmentId | null;
   projectId: string | null;
   threadId: string | null;
 }) => {
@@ -227,6 +235,7 @@ const SidePanelInlineSidebar = (props: {
     onCloseSidePanel,
     onOpenSidePanel,
     renderSidePanelContent,
+    environmentId,
     projectId,
     threadId,
   } = props;
@@ -259,7 +268,12 @@ const SidePanelInlineSidebar = (props: {
         }}
       >
         {renderSidePanelContent ? (
-          <LazySidePanel layout="sidebar" projectId={projectId} threadId={threadId} />
+          <LazySidePanel
+            layout="sidebar"
+            environmentId={environmentId}
+            projectId={projectId}
+            threadId={threadId}
+          />
         ) : null}
         <SidebarRail />
       </Sidebar>
@@ -414,6 +428,7 @@ function ChatThreadRouteView() {
             onCloseSidePanel={closeSidePanel}
             onOpenSidePanel={openSidePanel}
             renderSidePanelContent={shouldRenderSidePanelContent}
+            environmentId={threadRef.environmentId}
             projectId={projectId}
             threadId={threadRef.threadId}
           />
@@ -423,6 +438,7 @@ function ChatThreadRouteView() {
             {shouldRenderSidePanelContent ? (
               <LazySidePanel
                 layout="sheet"
+                environmentId={threadRef.environmentId}
                 projectId={projectId}
                 threadId={threadRef.threadId}
               />
@@ -449,7 +465,12 @@ function ChatThreadRouteView() {
       </DiffPanelSheet>
       <SidePanelSheet sidePanelOpen={sidePanelOpen} onCloseSidePanel={closeSidePanel}>
         {shouldRenderSidePanelContent ? (
-          <LazySidePanel layout="sheet" projectId={projectId} threadId={threadRef.threadId} />
+          <LazySidePanel
+            layout="sheet"
+            environmentId={threadRef.environmentId}
+            projectId={projectId}
+            threadId={threadRef.threadId}
+          />
         ) : null}
       </SidePanelSheet>
     </>
