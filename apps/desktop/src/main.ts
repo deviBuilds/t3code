@@ -474,26 +474,6 @@ function ensureInitialBackendWindowOpen(): void {
   backendInitialWindowOpenInFlight = nextOpen;
 }
 
-function getDesktopWindowBackgroundColor(): string {
-  return nativeTheme.shouldUseDarkColors
-    ? DESKTOP_WINDOW_BACKGROUND_DARK
-    : DESKTOP_WINDOW_BACKGROUND_LIGHT;
-}
-
-function applyDesktopWindowBackground(window: BrowserWindow): void {
-  if (window.isDestroyed()) {
-    return;
-  }
-
-  window.setBackgroundColor(getDesktopWindowBackgroundColor());
-}
-
-function syncAllDesktopWindowBackgrounds(): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    applyDesktopWindowBackground(window);
-  }
-}
-
 
 function writeDesktopStreamChunk(
   streamName: "stdout" | "stderr",
@@ -1653,7 +1633,7 @@ function registerIpcHandlers(): void {
     }
 
     nativeTheme.themeSource = theme;
-    syncAllDesktopWindowBackgrounds();
+    syncAllWindowAppearance();
   });
 
   ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
@@ -1788,7 +1768,9 @@ function getIconOption(): { icon: string } | Record<string, never> {
 }
 
 function getInitialWindowBackgroundColor(): string {
-  return nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
+  return nativeTheme.shouldUseDarkColors
+    ? DESKTOP_WINDOW_BACKGROUND_DARK
+    : DESKTOP_WINDOW_BACKGROUND_LIGHT;
 }
 
 function getWindowTitleBarOptions(): WindowTitleBarOptions {
@@ -1829,7 +1811,6 @@ function syncAllWindowAppearance(): void {
   }
 }
 
-nativeTheme.on("updated", syncAllWindowAppearance);
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -1839,9 +1820,8 @@ function createWindow(): BrowserWindow {
     minHeight: 620,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: getInitialWindowBackgroundColor(),
     ...getIconOption(),
-    backgroundColor: getDesktopWindowBackgroundColor(),
+    backgroundColor: getInitialWindowBackgroundColor(),
     title: APP_DISPLAY_NAME,
     ...getWindowTitleBarOptions(),
     webPreferences: {
@@ -2034,7 +2014,7 @@ app
     configureAppIdentity();
     configureApplicationMenu();
     registerDesktopProtocol();
-    nativeTheme.on("updated", syncAllDesktopWindowBackgrounds);
+    nativeTheme.on("updated", syncAllWindowAppearance);
     configureAutoUpdater();
     void bootstrap().catch((error) => {
       if (isBackendReadinessAborted(error) && isQuitting) {

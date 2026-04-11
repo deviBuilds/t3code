@@ -90,11 +90,7 @@ const EditorPanel = memo(function EditorPanel({
             </div>
           }
         >
-          <MonacoEditor
-            environmentId={environmentId}
-            cwd={cwd}
-            relativePath={activeFilePath}
-          />
+          <MonacoEditor environmentId={environmentId} cwd={cwd} relativePath={activeFilePath} />
         </Suspense>
       </div>
     </div>
