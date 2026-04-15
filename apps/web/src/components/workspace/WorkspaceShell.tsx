@@ -1,6 +1,17 @@
 import { useParams } from "@tanstack/react-router";
-import { Columns2Icon, Rows2Icon, TerminalSquareIcon, XIcon } from "lucide-react";
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CodeXmlIcon, Columns2Icon, GlobeIcon, Rows2Icon, TerminalSquareIcon, XIcon } from "lucide-react";
+import {
+  Fragment,
+  Suspense,
+  lazy,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createThreadSelectorByRef } from "../../storeSelectors";
 import { useStore } from "../../store";
 import { cn } from "../../lib/utils";
@@ -12,9 +23,10 @@ import { resolveThreadRouteTarget } from "../../threadRoutes";
 import { ThreadTerminalSurface } from "./ThreadTerminalSurface";
 import { useWorkspaceDragStore } from "../../workspace/dragStore";
 import {
+  useWorkspaceColumns,
+  useWorkspaceFocusedColumnIndex,
   useWorkspaceFocusedWindowId,
   useWorkspaceMobileActiveWindowId,
-  useWorkspaceNode,
   useWorkspaceRootNodeId,
   useWorkspaceStore,
   useWorkspaceSurface,
@@ -24,11 +36,22 @@ import {
 } from "../../workspace/store";
 import {
   normalizeWorkspaceSplitSizes,
-  type WorkspaceNode,
+  type WorkspaceColumn,
   type WorkspaceDropPlacement,
   type WorkspacePlacementTarget,
   type WorkspaceSurfaceInstance,
 } from "../../workspace/types";
+import { NIRI_MIN_COLUMN_WIDTH, NIRI_MAX_COLUMN_WIDTH } from "../../workspace/niriLayout";
+import { useEditorCwd } from "../../hooks/useEditorCwd";
+import {
+  selectProjectEditorTabs,
+  selectProjectActiveEditorTabId,
+  useSidePanelStore,
+} from "../../sidePanelStore";
+import { EditorTabBar } from "../editor/EditorTabBar";
+
+const BrowserPanel = lazy(() => import("../BrowserPanel"));
+const EditorPanel = lazy(() => import("../EditorPanel"));
 
 const WORKSPACE_MIN_PANE_SIZE_PX = 220;
 const WORKSPACE_DROP_EDGE_THRESHOLD = 0.22;
@@ -234,8 +257,11 @@ function WorkspaceRouteFallback() {
   );
 }
 
+// ── Niri Layout Root ───────────────────────────────────────────────────
+
 function WorkspaceLayoutRoot() {
-  const rootNodeId = useWorkspaceRootNodeId();
+  const columns = useWorkspaceColumns();
+  const focusedColumnIndex = useWorkspaceFocusedColumnIndex();
   const focusedWindowId = useWorkspaceFocusedWindowId();
   const mobileActiveWindowId = useWorkspaceMobileActiveWindowId();
   const windowIds = useWorkspaceWindowIds();
@@ -274,7 +300,10 @@ function WorkspaceLayoutRoot() {
           zoomedWindowId ? (
             <WorkspaceWindowView windowId={zoomedWindowId} />
           ) : (
-            <WorkspaceNodeView nodeId={rootNodeId} />
+            <NiriScrollContainer
+              columns={columns}
+              focusedColumnIndex={focusedColumnIndex}
+            />
           )
         ) : (
           <MobileWorkspaceWindow windowId={activeWindowId} />
@@ -300,30 +329,115 @@ const MobileWorkspaceWindow = memo(function MobileWorkspaceWindow(props: {
   return <WorkspaceWindowView windowId={window.id} />;
 });
 
-const WorkspaceNodeView = memo(function WorkspaceNodeView(props: { nodeId: string | null }) {
-  const node = useWorkspaceNode(props.nodeId);
+// ── Niri Scroll Container ──────────────────────────────────────────────
 
-  if (!props.nodeId) {
-    return null;
-  }
+const NiriScrollContainer = memo(function NiriScrollContainer(props: {
+  columns: WorkspaceColumn[];
+  focusedColumnIndex: number;
+}) {
+  const { columns, focusedColumnIndex } = props;
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
 
-  if (!node) {
-    return null;
-  }
+  // Measure container width via ResizeObserver
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => observer.disconnect();
+  }, []);
 
-  if (node.kind === "window") {
-    return <WorkspaceWindowView windowId={node.windowId} />;
-  }
+  // Compute pixel widths for each column
+  const columnPixelWidths = useMemo(() => {
+    if (containerWidth <= 0) return columns.map(() => 0);
+    const pixelWidths = columns.map((col) =>
+      Math.max(NIRI_COLUMN_MIN_WIDTH_PX, col.width * containerWidth),
+    );
+    const total = pixelWidths.reduce((sum, w) => sum + w, 0);
+    // Single column: stretch to fill viewport
+    if (columns.length === 1 || total <= containerWidth) {
+      const scale = containerWidth / Math.max(total, 1);
+      return pixelWidths.map((w) => w * scale);
+    }
+    return pixelWidths;
+  }, [columns, containerWidth]);
 
-  return <WorkspaceSplitNodeView node={node} />;
+  // Scroll to center the focused column using native scrollTo
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || containerWidth <= 0 || focusedColumnIndex < 0 || focusedColumnIndex >= columns.length) {
+      return;
+    }
+
+    let columnLeft = 0;
+    for (let i = 0; i < focusedColumnIndex; i++) {
+      columnLeft += columnPixelWidths[i]!;
+    }
+    const columnWidth = columnPixelWidths[focusedColumnIndex]!;
+
+    // Center the focused column
+    const target = columnLeft - (containerWidth - columnWidth) / 2;
+    el.scrollTo({ left: target, behavior: "smooth" });
+  }, [columns, focusedColumnIndex, containerWidth, columnPixelWidths]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className="niri-scroll-container relative h-full min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
+      style={{ scrollbarWidth: "none" }}
+    >
+      <style>{`.niri-scroll-container::-webkit-scrollbar { display: none; }`}</style>
+      <div className="flex h-full flex-row" style={{ width: "max-content" }}>
+        {columns.map((column, index) => (
+          <NiriColumnView
+            key={column.id}
+            column={column}
+            columnIndex={index}
+            pixelWidth={columnPixelWidths[index] ?? 0}
+            isLast={index === columns.length - 1}
+          />
+        ))}
+      </div>
+    </div>
+  );
 });
 
-const WorkspaceSplitNodeView = memo(function WorkspaceSplitNodeView(props: {
-  node: Extract<WorkspaceNode, { kind: "split" }>;
+// ── Niri Column View ───────────────────────────────────────────────────
+
+const NIRI_COLUMN_MIN_WIDTH_PX = 280;
+
+const NiriColumnView = memo(function NiriColumnView(props: {
+  column: WorkspaceColumn;
+  columnIndex: number;
+  pixelWidth: number;
+  isLast: boolean;
 }) {
-  const setSplitNodeSizes = useWorkspaceStore((state) => state.setSplitNodeSizes);
+  const { column, columnIndex, pixelWidth, isLast } = props;
+  const setColumnWindowSizes = useWorkspaceStore((state) => state.setColumnWindowSizes);
+  const setColumnWidth = useWorkspaceStore((state) => state.setColumnWidth);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeStateRef = useRef<{
+    pointerId: number;
+    handle: HTMLButtonElement;
+    startX: number;
+    startWidth: number;
+    viewportWidth: number;
+    rafId: number | null;
+    pendingWidth: number;
+  } | null>(null);
+
+  const sizes = useMemo(
+    () => normalizeWorkspaceSplitSizes(column.sizes, column.windowIds.length),
+    [column.sizes, column.windowIds.length],
+  );
+
+  // Vertical resize state (windows within column)
+  const vertResizeRef = useRef<{
     handle: HTMLButtonElement;
     handleIndex: number;
     pendingSizes: number[];
@@ -333,186 +447,237 @@ const WorkspaceSplitNodeView = memo(function WorkspaceSplitNodeView(props: {
     startSizes: number[];
     totalPx: number;
   } | null>(null);
-  const sizes = useMemo(
-    () => normalizeWorkspaceSplitSizes(props.node.sizes, props.node.childIds.length),
-    [props.node.childIds.length, props.node.sizes],
-  );
 
-  const stopResize = useCallback(
+  const stopVertResize = useCallback(
     (pointerId: number) => {
-      const resizeState = resizeStateRef.current;
-      if (!resizeState) {
-        return;
+      const state = vertResizeRef.current;
+      if (!state) return;
+      if (state.rafId !== null) {
+        window.cancelAnimationFrame(state.rafId);
+        setColumnWindowSizes(column.id, state.pendingSizes);
       }
-      if (resizeState.rafId !== null) {
-        window.cancelAnimationFrame(resizeState.rafId);
-        setSplitNodeSizes(props.node.id, resizeState.pendingSizes);
-      }
-      resizeStateRef.current = null;
-      if (resizeState.handle.hasPointerCapture(pointerId)) {
-        resizeState.handle.releasePointerCapture(pointerId);
+      vertResizeRef.current = null;
+      if (state.handle.hasPointerCapture(pointerId)) {
+        state.handle.releasePointerCapture(pointerId);
       }
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
     },
-    [props.node.id, setSplitNodeSizes],
+    [column.id, setColumnWindowSizes],
   );
 
-  useEffect(() => {
-    return () => {
-      const resizeState = resizeStateRef.current;
-      if (resizeState && resizeState.rafId !== null) {
-        window.cancelAnimationFrame(resizeState.rafId);
-      }
-      document.body.style.removeProperty("cursor");
-      document.body.style.removeProperty("user-select");
-    };
-  }, []);
-
-  const handleResizePointerDown = useCallback(
+  const handleVertResizePointerDown = useCallback(
     (handleIndex: number, event: React.PointerEvent<HTMLButtonElement>) => {
-      if (event.button !== 0) {
-        return;
-      }
-
+      if (event.button !== 0) return;
       const container = containerRef.current;
-      if (!container) {
-        return;
-      }
-
-      const rect = container.getBoundingClientRect();
-      const totalPx = props.node.axis === "x" ? rect.width : rect.height;
-      if (totalPx <= 0) {
-        return;
-      }
+      if (!container) return;
+      const totalPx = container.clientHeight;
+      if (totalPx <= 0) return;
 
       event.preventDefault();
       event.stopPropagation();
-      resizeStateRef.current = {
+      vertResizeRef.current = {
         handle: event.currentTarget,
         handleIndex,
         pendingSizes: sizes,
         pointerId: event.pointerId,
         rafId: null,
-        startCoordinate: props.node.axis === "x" ? event.clientX : event.clientY,
+        startCoordinate: event.clientY,
         startSizes: sizes,
         totalPx,
       };
       event.currentTarget.setPointerCapture(event.pointerId);
-      document.body.style.cursor = props.node.axis === "x" ? "col-resize" : "row-resize";
+      document.body.style.cursor = "row-resize";
       document.body.style.userSelect = "none";
     },
-    [props.node.axis, sizes],
+    [sizes],
   );
 
-  const handleResizePointerMove = useCallback(
+  const handleVertResizePointerMove = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
-      const resizeState = resizeStateRef.current;
-      if (!resizeState || resizeState.pointerId !== event.pointerId) {
-        return;
-      }
+      const state = vertResizeRef.current;
+      if (!state || state.pointerId !== event.pointerId) return;
 
       event.preventDefault();
-      const deltaPx =
-        (props.node.axis === "x" ? event.clientX : event.clientY) - resizeState.startCoordinate;
-      const deltaFraction = deltaPx / resizeState.totalPx;
-      const pairTotal =
-        resizeState.startSizes[resizeState.handleIndex]! +
-        resizeState.startSizes[resizeState.handleIndex + 1]!;
-      const requestedMinFraction = WORKSPACE_MIN_PANE_SIZE_PX / resizeState.totalPx;
-      const minFraction = Math.min(requestedMinFraction, Math.max(pairTotal / 2 - 0.001, 0));
+      const deltaPx = event.clientY - state.startCoordinate;
+      const deltaFraction = deltaPx / state.totalPx;
+      const pairTotal = state.startSizes[state.handleIndex]! + state.startSizes[state.handleIndex + 1]!;
+      const requestedMin = WORKSPACE_MIN_PANE_SIZE_PX / state.totalPx;
+      const minFraction = Math.min(requestedMin, Math.max(pairTotal / 2 - 0.001, 0));
 
       const nextBefore = Math.min(
         pairTotal - minFraction,
-        Math.max(minFraction, resizeState.startSizes[resizeState.handleIndex]! + deltaFraction),
+        Math.max(minFraction, state.startSizes[state.handleIndex]! + deltaFraction),
       );
       const nextAfter = pairTotal - nextBefore;
-      const nextSizes = [...resizeState.startSizes];
-      nextSizes[resizeState.handleIndex] = nextBefore;
-      nextSizes[resizeState.handleIndex + 1] = nextAfter;
-      resizeState.pendingSizes = nextSizes;
-      if (resizeState.rafId !== null) {
-        return;
-      }
+      const nextSizes = [...state.startSizes];
+      nextSizes[state.handleIndex] = nextBefore;
+      nextSizes[state.handleIndex + 1] = nextAfter;
+      state.pendingSizes = nextSizes;
 
-      resizeState.rafId = window.requestAnimationFrame(() => {
-        const activeResizeState = resizeStateRef.current;
-        if (!activeResizeState) {
-          return;
-        }
-        activeResizeState.rafId = null;
-        setSplitNodeSizes(props.node.id, activeResizeState.pendingSizes);
+      if (state.rafId !== null) return;
+      state.rafId = window.requestAnimationFrame(() => {
+        const active = vertResizeRef.current;
+        if (!active) return;
+        active.rafId = null;
+        setColumnWindowSizes(column.id, active.pendingSizes);
       });
     },
-    [props.node.axis, props.node.id, setSplitNodeSizes],
+    [column.id, setColumnWindowSizes],
   );
 
-  const endResizeInteraction = useCallback(
+  const endVertResize = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
-      const resizeState = resizeStateRef.current;
-      if (!resizeState || resizeState.pointerId !== event.pointerId) {
-        return;
-      }
+      const state = vertResizeRef.current;
+      if (!state || state.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      stopVertResize(event.pointerId);
+    },
+    [stopVertResize],
+  );
+
+  // Column width resize (horizontal handle on right edge)
+  const handleColResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0) return;
+      const parentContainer = containerRef.current?.parentElement;
+      if (!parentContainer) return;
+      const viewportWidth = parentContainer.clientWidth;
+      if (viewportWidth <= 0) return;
 
       event.preventDefault();
-      stopResize(event.pointerId);
+      event.stopPropagation();
+      resizeStateRef.current = {
+        pointerId: event.pointerId,
+        handle: event.currentTarget,
+        startX: event.clientX,
+        startWidth: column.width,
+        viewportWidth,
+        rafId: null,
+        pendingWidth: column.width,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
     },
-    [stopResize],
+    [column.width],
   );
+
+  const handleColResizePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      const state = resizeStateRef.current;
+      if (!state || state.pointerId !== event.pointerId) return;
+
+      event.preventDefault();
+      const deltaPx = event.clientX - state.startX;
+      const deltaFraction = deltaPx / state.viewportWidth;
+      const nextWidth = Math.min(
+        NIRI_MAX_COLUMN_WIDTH,
+        Math.max(NIRI_MIN_COLUMN_WIDTH, state.startWidth + deltaFraction),
+      );
+      state.pendingWidth = nextWidth;
+
+      if (state.rafId !== null) return;
+      state.rafId = window.requestAnimationFrame(() => {
+        const active = resizeStateRef.current;
+        if (!active) return;
+        active.rafId = null;
+        setColumnWidth(column.id, active.pendingWidth);
+      });
+    },
+    [column.id, setColumnWidth],
+  );
+
+  const endColResize = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      const state = resizeStateRef.current;
+      if (!state || state.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      if (state.rafId !== null) {
+        window.cancelAnimationFrame(state.rafId);
+        setColumnWidth(column.id, state.pendingWidth);
+      }
+      resizeStateRef.current = null;
+      if (state.handle.hasPointerCapture(event.pointerId)) {
+        state.handle.releasePointerCapture(event.pointerId);
+      }
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    },
+    [column.id, setColumnWidth],
+  );
+
+  useEffect(() => {
+    return () => {
+      const vs = vertResizeRef.current;
+      if (vs?.rafId !== null && vs) window.cancelAnimationFrame(vs.rafId);
+      const cs = resizeStateRef.current;
+      if (cs?.rafId !== null && cs) window.cancelAnimationFrame(cs.rafId);
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    };
+  }, []);
 
   return (
     <div
-      ref={containerRef}
-      className={cn(
-        "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden",
-        props.node.axis === "x" ? "flex-row" : "flex-col",
-      )}
+      className="flex h-full min-h-0 shrink-0 flex-row"
+      style={{
+        width: `${pixelWidth}px`,
+      }}
     >
-      {props.node.childIds.map((childId, index) => (
-        <Fragment key={childId}>
-          <div
-            className="h-full min-h-0 min-w-0 overflow-hidden"
-            style={{
-              flexBasis: 0,
-              flexGrow: sizes[index] ?? 1,
-              flexShrink: 1,
-            }}
-          >
-            <WorkspaceNodeView nodeId={childId} />
-          </div>
-          {index < props.node.childIds.length - 1 ? (
-            <button
-              type="button"
-              className={cn(
-                "relative z-10 shrink-0 bg-border/80 transition hover:bg-foreground/40",
-                props.node.axis === "x"
-                  ? "h-full w-1 cursor-col-resize touch-none"
-                  : "h-1 w-full cursor-row-resize touch-none",
-              )}
-              aria-label={
-                props.node.axis === "x" ? "Resize panes horizontally" : "Resize panes vertically"
-              }
-              title={props.node.axis === "x" ? "Drag to resize panes" : "Drag to resize panes"}
-              onPointerCancel={endResizeInteraction}
-              onPointerDown={(event) => handleResizePointerDown(index, event)}
-              onPointerMove={handleResizePointerMove}
-              onPointerUp={endResizeInteraction}
+      <div
+        ref={containerRef}
+        className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      >
+        {column.windowIds.map((windowId, index) => (
+          <Fragment key={windowId}>
+            <div
+              className="min-h-0 min-w-0 overflow-hidden"
+              style={{
+                flexBasis: 0,
+                flexGrow: sizes[index] ?? 1,
+                flexShrink: 1,
+              }}
             >
-              <span
-                className={cn(
-                  "pointer-events-none absolute rounded-full bg-background/90",
-                  props.node.axis === "x"
-                    ? "top-1/2 left-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2"
-                    : "top-1/2 left-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2",
-                )}
-              />
-            </button>
-          ) : null}
-        </Fragment>
-      ))}
+              <WorkspaceWindowView windowId={windowId} />
+            </div>
+            {index < column.windowIds.length - 1 ? (
+              <button
+                type="button"
+                className="relative z-10 h-1 w-full shrink-0 cursor-row-resize touch-none bg-border/80 transition hover:bg-foreground/40"
+                aria-label="Resize panes vertically"
+                title="Drag to resize panes"
+                onPointerCancel={endVertResize}
+                onPointerDown={(event) => handleVertResizePointerDown(index, event)}
+                onPointerMove={handleVertResizePointerMove}
+                onPointerUp={endVertResize}
+              >
+                <span className="pointer-events-none absolute top-1/2 left-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-background/90" />
+              </button>
+            ) : null}
+          </Fragment>
+        ))}
+      </div>
+      {/* Column resize handle (right edge) */}
+      {!isLast ? (
+        <button
+          type="button"
+          className="relative z-10 h-full w-1 shrink-0 cursor-col-resize touch-none bg-border/80 transition hover:bg-foreground/40"
+          aria-label="Resize column width"
+          title="Drag to resize column"
+          onPointerCancel={endColResize}
+          onPointerDown={handleColResizePointerDown}
+          onPointerMove={handleColResizePointerMove}
+          onPointerUp={endColResize}
+        >
+          <span className="pointer-events-none absolute top-1/2 left-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-background/90" />
+        </button>
+      ) : null}
     </div>
   );
 });
+
+// ── Window View (unchanged from before) ────────────────────────────────
 
 const WorkspaceWindowView = memo(function WorkspaceWindowView(props: { windowId: string }) {
   const dragItem = useWorkspaceDragStore((state) => state.item);
@@ -824,6 +989,8 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: { windowId:
   );
 });
 
+// ── Tab View ───────────────────────────────────────────────────────────
+
 const WorkspaceTabView = memo(function WorkspaceTabView(props: {
   closeSurface: (surfaceId: string) => void;
   focusTab: (windowId: string, surfaceId: string) => void;
@@ -890,6 +1057,8 @@ const WorkspaceTabView = memo(function WorkspaceTabView(props: {
   );
 });
 
+// ── Surface View ───────────────────────────────────────────────────────
+
 const WorkspaceSurfaceView = memo(function WorkspaceSurfaceView(props: {
   activationFocusRequestId?: number;
   bindSharedComposerHandle?: boolean;
@@ -928,21 +1097,138 @@ const WorkspaceSurfaceView = memo(function WorkspaceSurfaceView(props: {
     );
   }
 
+  if (props.surface.kind === "terminal") {
+    return (
+      <ThreadTerminalSurface
+        surfaceId={props.surface.id}
+        terminalId={props.surface.input.terminalId}
+        threadRef={props.surface.input.threadRef}
+        {...(props.activationFocusRequestId === undefined
+          ? {}
+          : { activationFocusRequestId: props.activationFocusRequestId })}
+      />
+    );
+  }
+
+  if (props.surface.kind === "browser") {
+    return (
+      <WorkspaceBrowserSurface
+        projectId={props.surface.input.projectId}
+      />
+    );
+  }
+
+  if (props.surface.kind === "editor") {
+    return (
+      <WorkspaceEditorSurface
+        environmentId={props.surface.input.environmentId}
+        projectId={props.surface.input.projectId}
+      />
+    );
+  }
+
+  return null;
+});
+
+// ── Browser / Editor Surface Wrappers ──────────────────────────────────
+
+const WorkspaceBrowserSurface = memo(function WorkspaceBrowserSurface(props: {
+  projectId: string;
+}) {
+  const store = useSidePanelStore;
+  const addTab = store((s) => s.addTab);
+
+  // Ensure projectId is set and at least one browser tab exists
+  useEffect(() => {
+    const s = store.getState();
+    store.setState({ activeProjectId: props.projectId });
+    const projectState = s.browserStateByProjectId[props.projectId];
+    if (!projectState || projectState.tabs.length === 0) {
+      addTab();
+    }
+  }, [props.projectId, addTab]);
+
   return (
-    <ThreadTerminalSurface
-      surfaceId={props.surface.id}
-      terminalId={props.surface.input.terminalId}
-      threadRef={props.surface.input.threadRef}
-      {...(props.activationFocusRequestId === undefined
-        ? {}
-        : { activationFocusRequestId: props.activationFocusRequestId })}
-    />
+    <div className="flex h-full w-full min-h-0 flex-col">
+      <Suspense
+        fallback={
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            Loading browser...
+          </div>
+        }
+      >
+        <BrowserPanel layout="sidebar" />
+      </Suspense>
+    </div>
   );
 });
+
+const WorkspaceEditorSurface = memo(function WorkspaceEditorSurface(props: {
+  environmentId: string;
+  projectId: string;
+}) {
+  const setActiveProjectId = useSidePanelStore((s) => s.setActiveProjectId);
+  const editorTabs = useSidePanelStore(selectProjectEditorTabs);
+  const activeEditorTabId = useSidePanelStore(selectProjectActiveEditorTabId);
+  const setActiveEditorTab = useSidePanelStore((s) => s.setActiveEditorTab);
+  const closeEditorTab = useSidePanelStore((s) => s.closeEditorTab);
+  const pinEditorTab = useSidePanelStore((s) => s.pinEditorTab);
+  const envId = props.environmentId as import("@t3tools/contracts").EnvironmentId;
+  const cwd = useEditorCwd(envId, props.projectId, null);
+
+  useEffect(() => {
+    setActiveProjectId(props.projectId);
+  }, [props.projectId, setActiveProjectId]);
+
+  return (
+    <div className="flex h-full w-full min-h-0 flex-col">
+      {editorTabs.length > 0 && (
+        <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border bg-card/60 px-1.5">
+          <EditorTabBar
+            tabs={editorTabs}
+            activeTabId={activeEditorTabId}
+            onActivate={setActiveEditorTab}
+            onClose={closeEditorTab}
+            onPin={pinEditorTab}
+          />
+        </div>
+      )}
+      <Suspense
+        fallback={
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            Loading editor...
+          </div>
+        }
+      >
+        <EditorPanel environmentId={envId} cwd={cwd} />
+      </Suspense>
+    </div>
+  );
+});
+
+// ── Surface Titles ─────────────────────────────────────────────────────
 
 function WorkspaceSurfaceTitle(props: { surface: WorkspaceSurfaceInstance }) {
   if (props.surface.kind === "terminal") {
     return <TerminalSurfaceTitle threadRef={props.surface.input.threadRef} />;
+  }
+
+  if (props.surface.kind === "browser") {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <GlobeIcon className="size-3 shrink-0" />
+        <span className="truncate">Browser</span>
+      </span>
+    );
+  }
+
+  if (props.surface.kind === "editor") {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <CodeXmlIcon className="size-3 shrink-0" />
+        <span className="truncate">Editor</span>
+      </span>
+    );
   }
 
   return <ThreadSurfaceTitle surface={props.surface} />;

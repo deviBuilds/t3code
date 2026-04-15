@@ -9,7 +9,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { DiffIcon, PanelRightIcon, TerminalSquareIcon } from "lucide-react";
+import { CodeXmlIcon, DiffIcon, GlobeIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -44,6 +44,7 @@ interface ChatHeaderProps {
   onToggleTerminal: () => void;
   onToggleDiff: () => void;
   onToggleSidePanel: () => void;
+  onToggleEditor: () => void;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -73,6 +74,7 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleTerminal,
   onToggleDiff,
   onToggleSidePanel,
+  onToggleEditor,
 }: ChatHeaderProps) {
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
@@ -181,17 +183,34 @@ export const ChatHeader = memo(function ChatHeader({
             render={
               <Toggle
                 className="shrink-0"
-                pressed={sidePanelOpen}
+                pressed={false}
                 onPressedChange={onToggleSidePanel}
-                aria-label="Toggle side panel"
+                aria-label="Toggle browser"
                 variant="outline"
                 size="xs"
               >
-                <PanelRightIcon className="size-3" />
+                <GlobeIcon className="size-3" />
               </Toggle>
             }
           />
-          <TooltipPopup side="bottom">Toggle side panel</TooltipPopup>
+          <TooltipPopup side="bottom">Toggle browser</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Toggle
+                className="shrink-0"
+                pressed={false}
+                onPressedChange={onToggleEditor}
+                aria-label="Toggle editor"
+                variant="outline"
+                size="xs"
+              >
+                <CodeXmlIcon className="size-3" />
+              </Toggle>
+            }
+          />
+          <TooltipPopup side="bottom">Toggle editor</TooltipPopup>
         </Tooltip>
       </div>
     </div>

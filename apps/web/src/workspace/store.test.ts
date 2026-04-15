@@ -40,7 +40,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("workspace store", () => {
+describe("workspace store (niri layout)", () => {
   it("focuses an existing thread surface instead of duplicating it by default", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
@@ -77,7 +77,7 @@ describe("workspace store", () => {
     expect(useWorkspaceStore.getState().document).toBe(initialDocument);
   });
 
-  it("collapses the split tree when closing the last tab in a window", async () => {
+  it("removes the column when closing the last tab in a window", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
@@ -90,8 +90,7 @@ describe("workspace store", () => {
 
     const splitDocument = useWorkspaceStore.getState().document;
     expect(Object.keys(splitDocument.windowsById)).toHaveLength(2);
-    expect(splitDocument.rootNodeId).not.toBeNull();
-    expect(splitDocument.nodesById[splitDocument.rootNodeId!]?.kind).toBe("split");
+    expect(splitDocument.columns).toHaveLength(2);
 
     const closingWindowId = splitDocument.focusedWindowId!;
     const closingSurfaceId = splitDocument.windowsById[closingWindowId]!.activeTabId!;
@@ -99,8 +98,7 @@ describe("workspace store", () => {
 
     const collapsedDocument = useWorkspaceStore.getState().document;
     expect(Object.keys(collapsedDocument.windowsById)).toHaveLength(1);
-    expect(collapsedDocument.rootNodeId).not.toBeNull();
-    expect(collapsedDocument.nodesById[collapsedDocument.rootNodeId!]?.kind).toBe("window");
+    expect(collapsedDocument.columns).toHaveLength(1);
   });
 
   it("creates one terminal surface per thread and toggles it off cleanly", async () => {
@@ -186,6 +184,7 @@ describe("workspace store", () => {
 
     const nextDocument = useWorkspaceStore.getState().document;
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(2);
+    expect(nextDocument.columns).toHaveLength(2);
     const activeWindowId = nextDocument.focusedWindowId!;
     const activeSurfaceId = nextDocument.windowsById[activeWindowId]!.activeTabId!;
     expect(nextDocument.surfacesById[activeSurfaceId]?.kind).toBe("terminal");
@@ -207,6 +206,7 @@ describe("workspace store", () => {
       (surface) => surface.kind === "terminal",
     );
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(3);
+    expect(nextDocument.columns).toHaveLength(3);
     expect(terminalSurfaces).toHaveLength(2);
     expect(new Set(terminalSurfaces.map((surface) => surface.input.terminalId)).size).toBe(2);
   });
@@ -233,7 +233,7 @@ describe("workspace store", () => {
     expect(new Set(terminalSurfaces.map((surface) => surface.input.terminalId)).size).toBe(2);
   });
 
-  it("splits the active surface in the selected window", async () => {
+  it("splits the active surface into a new column", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
@@ -250,15 +250,15 @@ describe("workspace store", () => {
 
     const nextDocument = useWorkspaceStore.getState().document;
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(2);
+    expect(nextDocument.columns).toHaveLength(2);
     const newWindowId = nextDocument.focusedWindowId!;
     expect(newWindowId).not.toBe(sourceWindowId);
     const newSurfaceId = nextDocument.windowsById[newWindowId]!.activeTabId!;
     expect(newSurfaceId).not.toBe(sourceSurfaceId);
     expect(nextDocument.surfacesById[newSurfaceId]?.kind).toBe("thread");
-    expect(nextDocument.nodesById[nextDocument.rootNodeId!]?.kind).toBe("split");
   });
 
-  it("rebalances same-axis auto splits evenly when adding a third pane", async () => {
+  it("creates three columns when adding three panes", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
@@ -272,17 +272,11 @@ describe("workspace store", () => {
     useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadC), "x");
 
     const nextDocument = useWorkspaceStore.getState().document;
-    const rootNode = nextDocument.nodesById[nextDocument.rootNodeId!];
-    expect(rootNode?.kind).toBe("split");
-    if (rootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    expect(rootNode.childIds).toHaveLength(3);
-    expect(rootNode.sizingMode).toBe("auto");
-    expect(rootNode.sizes).toEqual([1 / 3, 1 / 3, 1 / 3]);
+    expect(nextDocument.columns).toHaveLength(3);
+    expect(Object.keys(nextDocument.windowsById)).toHaveLength(3);
   });
 
-  it("persists resized split proportions on the workspace node", async () => {
+  it("resizes a column width via keyboard shortcut direction", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
@@ -293,137 +287,70 @@ describe("workspace store", () => {
     useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
     useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
 
-    const splitNodeId = useWorkspaceStore.getState().document.rootNodeId!;
-    useWorkspaceStore.getState().setSplitNodeSizes(splitNodeId, [1, 3]);
+    const beforeWidth = useWorkspaceStore.getState().document.columns[1]!.width;
+
+    useWorkspaceStore.getState().resizeFocusedWindow("right");
+
+    const afterWidth = useWorkspaceStore.getState().document.columns[1]!.width;
+    expect(afterWidth).toBeGreaterThan(beforeWidth);
+  });
+
+  it("equalizes all column widths", async () => {
+    getTestWindow();
+    const { useWorkspaceStore } = await import("./store");
+    const { serverThreadSurfaceInput } = await import("./types");
+    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
+    const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
+
+    useWorkspaceStore.getState().resetWorkspace();
+    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
+    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
+
+    useWorkspaceStore.getState().resizeFocusedWindow("right");
+    useWorkspaceStore.getState().equalizeSplits();
 
     const nextDocument = useWorkspaceStore.getState().document;
-    const splitNode = nextDocument.nodesById[splitNodeId];
-    expect(splitNode?.kind).toBe("split");
-    if (splitNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    expect(splitNode.sizes).toEqual([0.25, 0.75]);
-    expect(splitNode.sizingMode).toBe("manual");
+    // equalizeSplits resets each column to the default niri width (0.5)
+    expect(nextDocument.columns[0]!.width).toBe(0.5);
+    expect(nextDocument.columns[1]!.width).toBe(0.5);
+    expect(nextDocument.columns[0]!.sizingMode).toBe("auto");
   });
 
-  it("keeps manual same-axis splits local when adding another pane", async () => {
+  it("toggles zoom for the focused pane", async () => {
+    getTestWindow();
+    const { useWorkspaceStore } = await import("./store");
+    const { serverThreadSurfaceInput } = await import("./types");
+    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
+
+    useWorkspaceStore.getState().resetWorkspace();
+    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
+
+    const focusedWindowId = useWorkspaceStore.getState().document.focusedWindowId!;
+    useWorkspaceStore.getState().toggleFocusedWindowZoom();
+    expect(useWorkspaceStore.getState().zoomedWindowId).toBe(focusedWindowId);
+
+    useWorkspaceStore.getState().toggleFocusedWindowZoom();
+    expect(useWorkspaceStore.getState().zoomedWindowId).toBeNull();
+  });
+
+  it("closes the focused pane and removes its column", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
     const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
     const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
-    const threadC = scopeThreadRef("environment-c" as never, "thread-c" as never);
 
     useWorkspaceStore.getState().resetWorkspace();
     useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
     useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
 
-    const rootNodeId = useWorkspaceStore.getState().document.rootNodeId!;
-    useWorkspaceStore.getState().setSplitNodeSizes(rootNodeId, [0.7, 0.3]);
-    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadC), "x");
+    const closingWindowId = useWorkspaceStore.getState().document.focusedWindowId!;
+    useWorkspaceStore.getState().closeFocusedWindow();
 
     const nextDocument = useWorkspaceStore.getState().document;
-    const rootNode = nextDocument.nodesById[rootNodeId];
-    expect(rootNode?.kind).toBe("split");
-    if (rootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    expect(rootNode.childIds).toHaveLength(2);
-    expect(rootNode.sizingMode).toBe("manual");
-    expect(rootNode.sizes).toEqual([0.7, 0.3]);
-
-    const nestedNode = nextDocument.nodesById[rootNode.childIds[1]!];
-    expect(nestedNode?.kind).toBe("split");
-    if (nestedNode?.kind !== "split") {
-      throw new Error("Expected nested split node");
-    }
-    expect(nestedNode.axis).toBe("x");
-    expect(nestedNode.sizingMode).toBe("auto");
-    expect(nestedNode.childIds).toHaveLength(2);
-  });
-
-  it("rebalances auto split groups after closing a pane", async () => {
-    getTestWindow();
-    const { useWorkspaceStore } = await import("./store");
-    const { serverThreadSurfaceInput } = await import("./types");
-    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
-    const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
-    const threadC = scopeThreadRef("environment-c" as never, "thread-c" as never);
-
-    useWorkspaceStore.getState().resetWorkspace();
-    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
-    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
-    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadC), "x");
-
-    let document = useWorkspaceStore.getState().document;
-    const rootNode = document.nodesById[document.rootNodeId!];
-    expect(rootNode?.kind).toBe("split");
-    if (rootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-
-    const middleNode = rootNode.childIds[1] ? document.nodesById[rootNode.childIds[1]!] : null;
-    const middleWindowId = middleNode?.kind === "window" ? middleNode.windowId : null;
-    if (!middleWindowId) {
-      throw new Error("Expected middle window node");
-    }
-    const middleSurfaceId = document.windowsById[middleWindowId]!.activeTabId!;
-
-    useWorkspaceStore.getState().closeSurface(middleSurfaceId);
-
-    document = useWorkspaceStore.getState().document;
-    const nextRootNode = document.nodesById[document.rootNodeId!];
-    expect(nextRootNode?.kind).toBe("split");
-    if (nextRootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    expect(nextRootNode.childIds).toHaveLength(2);
-    expect(nextRootNode.sizingMode).toBe("auto");
-    expect(nextRootNode.sizes).toEqual([0.5, 0.5]);
-  });
-
-  it("preserves remaining proportions after closing a pane in a manual split group", async () => {
-    getTestWindow();
-    const { useWorkspaceStore } = await import("./store");
-    const { serverThreadSurfaceInput } = await import("./types");
-    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
-    const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
-    const threadC = scopeThreadRef("environment-c" as never, "thread-c" as never);
-
-    useWorkspaceStore.getState().resetWorkspace();
-    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
-    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
-    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadC), "x");
-
-    const rootNodeId = useWorkspaceStore.getState().document.rootNodeId!;
-    useWorkspaceStore.getState().setSplitNodeSizes(rootNodeId, [0.2, 0.3, 0.5]);
-
-    let document = useWorkspaceStore.getState().document;
-    const rootNode = document.nodesById[rootNodeId];
-    expect(rootNode?.kind).toBe("split");
-    if (rootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-
-    const middleNode = rootNode.childIds[1] ? document.nodesById[rootNode.childIds[1]!] : null;
-    const middleWindowId = middleNode?.kind === "window" ? middleNode.windowId : null;
-    if (!middleWindowId) {
-      throw new Error("Expected middle window node");
-    }
-    const middleSurfaceId = document.windowsById[middleWindowId]!.activeTabId!;
-
-    useWorkspaceStore.getState().closeSurface(middleSurfaceId);
-
-    document = useWorkspaceStore.getState().document;
-    const nextRootNode = document.nodesById[document.rootNodeId!];
-    expect(nextRootNode?.kind).toBe("split");
-    if (nextRootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    expect(nextRootNode.childIds).toHaveLength(2);
-    expect(nextRootNode.sizingMode).toBe("manual");
-    expect(nextRootNode.sizes[0]).toBeCloseTo(2 / 7);
-    expect(nextRootNode.sizes[1]).toBeCloseTo(5 / 7);
+    expect(nextDocument.windowsById[closingWindowId]).toBeUndefined();
+    expect(Object.keys(nextDocument.windowsById)).toHaveLength(1);
+    expect(nextDocument.columns).toHaveLength(1);
   });
 
   it("focuses the adjacent pane in the requested direction", async () => {
@@ -465,101 +392,7 @@ describe("workspace store", () => {
     expect(useWorkspaceStore.getState().document.focusedWindowId).toBe(rightWindowId);
   });
 
-  it("resizes the focused pane toward an adjacent pane", async () => {
-    getTestWindow();
-    const { useWorkspaceStore } = await import("./store");
-    const { serverThreadSurfaceInput } = await import("./types");
-    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
-    const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
-
-    useWorkspaceStore.getState().resetWorkspace();
-    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
-    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
-
-    const beforeDocument = useWorkspaceStore.getState().document;
-    const rootNode = beforeDocument.nodesById[beforeDocument.rootNodeId!];
-    expect(rootNode?.kind).toBe("split");
-    if (rootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    const beforeSizes = [...rootNode.sizes];
-
-    useWorkspaceStore.getState().resizeFocusedWindow("left");
-
-    const nextDocument = useWorkspaceStore.getState().document;
-    const nextRootNode = nextDocument.nodesById[nextDocument.rootNodeId!];
-    expect(nextRootNode?.kind).toBe("split");
-    if (nextRootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    expect(nextRootNode.sizingMode).toBe("manual");
-    expect(nextRootNode.sizes[1]).toBeGreaterThan(beforeSizes[1] ?? 0);
-    expect(nextRootNode.sizes[0]).toBeLessThan(beforeSizes[0] ?? 0);
-  });
-
-  it("equalizes splits back to auto sizing", async () => {
-    getTestWindow();
-    const { useWorkspaceStore } = await import("./store");
-    const { serverThreadSurfaceInput } = await import("./types");
-    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
-    const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
-
-    useWorkspaceStore.getState().resetWorkspace();
-    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
-    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
-    const splitNodeId = useWorkspaceStore.getState().document.rootNodeId!;
-    useWorkspaceStore.getState().setSplitNodeSizes(splitNodeId, [1, 3]);
-
-    useWorkspaceStore.getState().equalizeSplits();
-
-    const nextDocument = useWorkspaceStore.getState().document;
-    const rootNode = nextDocument.nodesById[splitNodeId];
-    expect(rootNode?.kind).toBe("split");
-    if (rootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    expect(rootNode.sizingMode).toBe("auto");
-    expect(rootNode.sizes).toEqual([0.5, 0.5]);
-  });
-
-  it("toggles zoom for the focused pane", async () => {
-    getTestWindow();
-    const { useWorkspaceStore } = await import("./store");
-    const { serverThreadSurfaceInput } = await import("./types");
-    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
-
-    useWorkspaceStore.getState().resetWorkspace();
-    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
-
-    const focusedWindowId = useWorkspaceStore.getState().document.focusedWindowId!;
-    useWorkspaceStore.getState().toggleFocusedWindowZoom();
-    expect(useWorkspaceStore.getState().zoomedWindowId).toBe(focusedWindowId);
-
-    useWorkspaceStore.getState().toggleFocusedWindowZoom();
-    expect(useWorkspaceStore.getState().zoomedWindowId).toBeNull();
-  });
-
-  it("closes the focused pane and keeps the remaining pane active", async () => {
-    getTestWindow();
-    const { useWorkspaceStore } = await import("./store");
-    const { serverThreadSurfaceInput } = await import("./types");
-    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
-    const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
-
-    useWorkspaceStore.getState().resetWorkspace();
-    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
-    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
-
-    const closingWindowId = useWorkspaceStore.getState().document.focusedWindowId!;
-    useWorkspaceStore.getState().closeFocusedWindow();
-
-    const nextDocument = useWorkspaceStore.getState().document;
-    expect(nextDocument.windowsById[closingWindowId]).toBeUndefined();
-    expect(Object.keys(nextDocument.windowsById)).toHaveLength(1);
-    expect(nextDocument.nodesById[nextDocument.rootNodeId!]?.kind).toBe("window");
-  });
-
-  it("moves the active tab into the adjacent pane and collapses the source pane if empty", async () => {
+  it("moves the active tab into the adjacent column", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
@@ -579,7 +412,7 @@ describe("workspace store", () => {
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(1);
     const remainingWindowId = nextDocument.focusedWindowId!;
     expect(nextDocument.windowsById[remainingWindowId]!.tabIds).toHaveLength(2);
-    expect(nextDocument.nodesById[nextDocument.rootNodeId!]?.kind).toBe("window");
+    expect(nextDocument.columns).toHaveLength(1);
   });
 
   it("moves a specific surface before another tab when placing it on a tab target", async () => {
@@ -646,7 +479,7 @@ describe("workspace store", () => {
     expect(nextDocument.windowsById[targetWindowId]!.tabIds).toHaveLength(2);
   });
 
-  it("splits a window by moving a non-active tab to an edge target", async () => {
+  it("splits a window by moving a non-active tab to a new column", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
@@ -669,10 +502,10 @@ describe("workspace store", () => {
 
     const nextDocument = useWorkspaceStore.getState().document;
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(2);
-    expect(nextDocument.nodesById[nextDocument.rootNodeId!]?.kind).toBe("split");
+    expect(nextDocument.columns).toHaveLength(2);
   });
 
-  it("moves the focused pane by swapping positions with the adjacent pane", async () => {
+  it("swaps column positions when moving the focused pane", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
@@ -684,30 +517,18 @@ describe("workspace store", () => {
     useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "x");
 
     const beforeDocument = useWorkspaceStore.getState().document;
-    const rootNode = beforeDocument.nodesById[beforeDocument.rootNodeId!];
-    expect(rootNode?.kind).toBe("split");
-    if (rootNode?.kind !== "split") {
-      throw new Error("Expected split node");
-    }
-    const leftNodeId = rootNode.childIds[0]!;
-    const rightNodeId = rootNode.childIds[1]!;
     const rightWindowId = beforeDocument.focusedWindowId!;
+    const rightColumnId = beforeDocument.columns[1]!.id;
 
     useWorkspaceStore.getState().moveFocusedWindow("left");
 
     const nextDocument = useWorkspaceStore.getState().document;
     expect(nextDocument.focusedWindowId).toBe(rightWindowId);
-    expect(nextDocument.nodesById[leftNodeId]).toMatchObject({
-      kind: "window",
-      windowId: rightWindowId,
-    });
-    expect(nextDocument.nodesById[rightNodeId]).not.toMatchObject({
-      kind: "window",
-      windowId: rightWindowId,
-    });
+    // The right column should now be at index 0
+    expect(nextDocument.columns[0]!.id).toBe(rightColumnId);
   });
 
-  it("clears the workspace tree when closing the last focused pane", async () => {
+  it("clears the workspace when closing the last focused pane", async () => {
     getTestWindow();
     const { useWorkspaceStore } = await import("./store");
     const { serverThreadSurfaceInput } = await import("./types");
@@ -718,7 +539,7 @@ describe("workspace store", () => {
     useWorkspaceStore.getState().closeFocusedWindow();
 
     const nextDocument = useWorkspaceStore.getState().document;
-    expect(nextDocument.rootNodeId).toBeNull();
+    expect(nextDocument.columns).toHaveLength(0);
     expect(nextDocument.focusedWindowId).toBeNull();
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(0);
     expect(Object.keys(nextDocument.surfacesById)).toHaveLength(0);
@@ -740,7 +561,24 @@ describe("workspace store", () => {
     await vi.advanceTimersByTimeAsync(150);
 
     const persisted = JSON.parse(testWindow.localStorage.getItem(WORKSPACE_DOCUMENT_STORAGE_KEY)!);
-    expect(persisted.layoutEngine).toBe("split");
+    expect(persisted.layoutEngine).toBe("niri");
     expect(persisted.focusedWindowId).not.toBeNull();
+  });
+
+  it("adds a window below in the same column when splitting vertically", async () => {
+    getTestWindow();
+    const { useWorkspaceStore } = await import("./store");
+    const { serverThreadSurfaceInput } = await import("./types");
+    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
+    const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
+
+    useWorkspaceStore.getState().resetWorkspace();
+    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
+    useWorkspaceStore.getState().openThreadInSplit(serverThreadSurfaceInput(threadB), "y");
+
+    const nextDocument = useWorkspaceStore.getState().document;
+    expect(nextDocument.columns).toHaveLength(1);
+    expect(nextDocument.columns[0]!.windowIds).toHaveLength(2);
+    expect(Object.keys(nextDocument.windowsById)).toHaveLength(2);
   });
 });

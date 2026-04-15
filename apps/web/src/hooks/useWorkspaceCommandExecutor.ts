@@ -164,7 +164,7 @@ function threadRefForWorkspaceSurface(
     return surface.input.threadRef;
   }
 
-  if (surface.input.scope === "server") {
+  if (surface.kind === "thread" && surface.input.scope === "server") {
     return surface.input.threadRef;
   }
 

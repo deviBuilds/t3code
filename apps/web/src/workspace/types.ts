@@ -6,8 +6,8 @@ import type { ThreadRouteTarget } from "../threadRoutes";
 export type WorkspaceAxis = "x" | "y";
 export type WorkspaceDirection = "left" | "right" | "up" | "down";
 export type WorkspaceDropPlacement = "center" | "left" | "right" | "top" | "bottom";
-export type WorkspaceLayoutEngine = "split";
-export type WorkspaceSurfaceKind = "thread" | "terminal";
+export type WorkspaceLayoutEngine = "split" | "niri";
+export type WorkspaceSurfaceKind = "thread" | "terminal" | "browser" | "editor";
 export type WorkspaceSplitSizingMode = "auto" | "manual";
 
 export type ThreadSurfaceInput =
@@ -28,6 +28,18 @@ export interface TerminalSurfaceInput {
   terminalId: string;
 }
 
+export interface BrowserSurfaceInput {
+  environmentId: EnvironmentId;
+  projectId: string;
+  initialUrl?: string;
+}
+
+export interface EditorSurfaceInput {
+  environmentId: EnvironmentId;
+  projectId: string;
+  initialFilePath?: string;
+}
+
 export type WorkspaceSurfaceInstance =
   | {
       id: string;
@@ -38,6 +50,16 @@ export type WorkspaceSurfaceInstance =
       id: string;
       kind: "terminal";
       input: TerminalSurfaceInput;
+    }
+  | {
+      id: string;
+      kind: "browser";
+      input: BrowserSurfaceInput;
+    }
+  | {
+      id: string;
+      kind: "editor";
+      input: EditorSurfaceInput;
     };
 
 export interface WorkspaceWindow {
@@ -82,6 +104,52 @@ export interface WorkspaceDocument {
   surfacesById: Record<string, WorkspaceSurfaceInstance>;
   focusedWindowId: string | null;
   mobileActiveWindowId: string | null;
+}
+
+// ── Niri Column Layout Types ───────────────────────────────────────────
+
+export interface WorkspaceColumn {
+  id: string;
+  windowIds: string[];
+  sizes: number[];
+  width: number;
+  sizingMode: WorkspaceSplitSizingMode;
+}
+
+export interface WorkspaceDocumentNiri {
+  version: 2;
+  layoutEngine: "niri";
+  columns: WorkspaceColumn[];
+  focusedColumnIndex: number;
+  focusedWindowId: string | null;
+  mobileActiveWindowId: string | null;
+  windowsById: Record<string, WorkspaceWindow>;
+  surfacesById: Record<string, WorkspaceSurfaceInstance>;
+  scrollOffset: number;
+}
+
+export type AnyWorkspaceDocument = WorkspaceDocument | WorkspaceDocumentNiri;
+
+export function createEmptyNiriDocument(): WorkspaceDocumentNiri {
+  return {
+    version: 2,
+    layoutEngine: "niri",
+    columns: [],
+    focusedColumnIndex: -1,
+    focusedWindowId: null,
+    mobileActiveWindowId: null,
+    windowsById: {},
+    surfacesById: {},
+    scrollOffset: 0,
+  };
+}
+
+export function isNiriDocument(value: unknown): value is WorkspaceDocumentNiri {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<WorkspaceDocumentNiri>;
+  return candidate.version === 2 && candidate.layoutEngine === "niri";
 }
 
 export function createEmptyWorkspaceDocument(): WorkspaceDocument {
@@ -170,6 +238,22 @@ export function sameTerminalSurfaceInput(
   );
 }
 
+export function sameBrowserSurfaceInput(
+  left: BrowserSurfaceInput | null | undefined,
+  right: BrowserSurfaceInput | null | undefined,
+): boolean {
+  if (!left || !right) return false;
+  return left.environmentId === right.environmentId && left.projectId === right.projectId;
+}
+
+export function sameEditorSurfaceInput(
+  left: EditorSurfaceInput | null | undefined,
+  right: EditorSurfaceInput | null | undefined,
+): boolean {
+  if (!left || !right) return false;
+  return left.environmentId === right.environmentId && left.projectId === right.projectId;
+}
+
 export function sameWorkspaceSurface(
   left: WorkspaceSurfaceInstance | null | undefined,
   right: WorkspaceSurfaceInstance | null | undefined,
@@ -184,6 +268,14 @@ export function sameWorkspaceSurface(
 
   if (left.kind === "terminal" && right.kind === "terminal") {
     return sameTerminalSurfaceInput(left.input, right.input);
+  }
+
+  if (left.kind === "browser" && right.kind === "browser") {
+    return sameBrowserSurfaceInput(left.input, right.input);
+  }
+
+  if (left.kind === "editor" && right.kind === "editor") {
+    return sameEditorSurfaceInput(left.input, right.input);
   }
 
   return false;
@@ -210,10 +302,15 @@ export function routeTargetForSurface(
     };
   }
 
-  return {
-    kind: "server",
-    threadRef: surface.input.threadRef,
-  };
+  if (surface.kind === "terminal") {
+    return {
+      kind: "server",
+      threadRef: surface.input.threadRef,
+    };
+  }
+
+  // Browser and editor surfaces don't have thread route targets
+  return null;
 }
 
 export function normalizeThreadSurfaceInput(input: ThreadSurfaceInput): ThreadSurfaceInput {
@@ -258,4 +355,24 @@ export function terminalSurfaceInput(
     threadRef,
     terminalId,
   };
+}
+
+export function browserSurfaceInput(
+  environmentId: EnvironmentId,
+  projectId: string,
+  initialUrl?: string,
+): BrowserSurfaceInput {
+  const result: BrowserSurfaceInput = { environmentId, projectId };
+  if (initialUrl !== undefined) result.initialUrl = initialUrl;
+  return result;
+}
+
+export function editorSurfaceInput(
+  environmentId: EnvironmentId,
+  projectId: string,
+  initialFilePath?: string,
+): EditorSurfaceInput {
+  const result: EditorSurfaceInput = { environmentId, projectId };
+  if (initialFilePath !== undefined) result.initialFilePath = initialFilePath;
+  return result;
 }
