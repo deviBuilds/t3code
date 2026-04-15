@@ -1574,6 +1574,37 @@ export default function ChatView(props: ChatViewProps) {
   const addTerminalContextToDraft = useCallback((selection: TerminalContextSelection) => {
     composerRef.current?.addTerminalContext(selection);
   }, []);
+
+  // Watch for design mode actions from the browser panel
+  const pendingDesignAction = useSidePanelStore((s) => s.pendingDesignAction);
+  const clearPendingDesignAction = useSidePanelStore((s) => s.clearPendingDesignAction);
+  useEffect(() => {
+    if (!pendingDesignAction) return;
+    const { selector, outerHTML, description } = pendingDesignAction;
+    const contextBlock = [
+      description
+        ? `Design change for \`${selector}\`: ${description}`
+        : `Selected element \`${selector}\` from browser:`,
+      "",
+      "```html",
+      outerHTML,
+      "```",
+    ].join("\n");
+    setComposerDraftPrompt(composerDraftTarget, contextBlock);
+    composerRef.current?.resetCursorState({
+      prompt: contextBlock,
+      cursor: contextBlock.length,
+    });
+    clearPendingDesignAction();
+    scheduleComposerFocus();
+  }, [
+    pendingDesignAction,
+    clearPendingDesignAction,
+    scheduleComposerFocus,
+    setComposerDraftPrompt,
+    composerDraftTarget,
+  ]);
+
   const setTerminalOpen = useCallback(
     (open: boolean) => {
       if (!activeThreadRef) return;

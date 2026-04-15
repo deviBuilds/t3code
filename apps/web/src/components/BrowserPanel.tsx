@@ -28,6 +28,8 @@ import {
   ChevronRightIcon,
   ChevronDownIcon,
   GripVerticalIcon,
+  PencilIcon,
+  ArrowUpIcon,
 } from "lucide-react";
 import {
   DndContext,
@@ -70,6 +72,7 @@ interface ElectronWebviewElement extends HTMLElement {
   loadURL: (url: string) => Promise<void>;
   getTitle: () => string;
   getURL: () => string;
+  executeJavaScript: (code: string) => Promise<unknown>;
 }
 
 // ── Favicon ─────────────────────────────────────────────────────────────
@@ -707,6 +710,138 @@ const HistoryPanel = memo(function HistoryPanel({
   );
 });
 
+// ── Design Mode ─────────────────────────────────────────────────────────
+
+interface DesignModeElement {
+  selector: string;
+  tagName: string;
+  rect: {
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+    bottom: number;
+    right: number;
+  };
+  outerHTML: string;
+}
+
+const DESIGN_MODE_INJECT_SCRIPT = `(function() {
+  if (window.__t3DesignCleanup) window.__t3DesignCleanup();
+
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483646;border:2px solid #22d3ee;background:rgba(34,211,238,0.08);display:none;transition:top 50ms,left 50ms,width 50ms,height 50ms;';
+  document.documentElement.appendChild(ov);
+
+  var lb = document.createElement('div');
+  lb.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;background:#0f172a;color:#22d3ee;font-size:11px;font-family:ui-monospace,monospace;padding:2px 6px;border-radius:4px;display:none;white-space:nowrap;';
+  document.documentElement.appendChild(lb);
+
+  var sel = null, hov = null;
+
+  function getLabel(el) {
+    var s = el.tagName.toLowerCase();
+    if (el.id) s = '#' + el.id + s;
+    else if (el.className && typeof el.className === 'string') {
+      var c = el.className.trim().split(/\\s+/).slice(0, 2).join('.');
+      if (c) s += '.' + c;
+    }
+    return s;
+  }
+
+  function showOverlay(el) {
+    var r = el.getBoundingClientRect();
+    ov.style.top = r.top + 'px';
+    ov.style.left = r.left + 'px';
+    ov.style.width = r.width + 'px';
+    ov.style.height = r.height + 'px';
+    ov.style.display = 'block';
+    lb.textContent = getLabel(el);
+    lb.style.display = 'block';
+    var lw = lb.offsetWidth;
+    lb.style.top = Math.max(0, r.top - 24) + 'px';
+    lb.style.left = (r.right - lw) + 'px';
+  }
+
+  function onMouseMove(e) {
+    if (sel) return;
+    var el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || el === ov || el === lb || el === document.documentElement || el === document.body) {
+      ov.style.display = 'none';
+      lb.style.display = 'none';
+      hov = null;
+      return;
+    }
+    if (el === hov) return;
+    hov = el;
+    ov.style.borderColor = '#22d3ee';
+    ov.style.background = 'rgba(34,211,238,0.08)';
+    showOverlay(el);
+  }
+
+  function onClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    var el = sel ? document.elementFromPoint(e.clientX, e.clientY) : hov;
+    if (!el || el === ov || el === lb) return;
+    sel = el;
+    ov.style.borderColor = '#3b82f6';
+    ov.style.background = 'rgba(59,130,246,0.08)';
+    showOverlay(el);
+    var r = el.getBoundingClientRect();
+    console.log('__T3DESIGN__:' + JSON.stringify({
+      type: 'select',
+      selector: getLabel(el),
+      tagName: el.tagName.toLowerCase(),
+      rect: { top: r.top, left: r.left, width: r.width, height: r.height, bottom: r.bottom, right: r.right },
+      outerHTML: el.outerHTML.substring(0, 800)
+    }));
+  }
+
+  function onKeyDown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (sel) {
+        sel = null;
+        hov = null;
+        ov.style.display = 'none';
+        lb.style.display = 'none';
+        ov.style.borderColor = '#22d3ee';
+        ov.style.background = 'rgba(34,211,238,0.08)';
+        console.log('__T3DESIGN__:' + JSON.stringify({ type: 'deselect' }));
+      } else {
+        console.log('__T3DESIGN__:' + JSON.stringify({ type: 'exit' }));
+      }
+    }
+  }
+
+  document.addEventListener('mousemove', onMouseMove, true);
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('keydown', onKeyDown, true);
+
+  window.__t3DesignDeselect = function() {
+    sel = null;
+    hov = null;
+    ov.style.display = 'none';
+    lb.style.display = 'none';
+    ov.style.borderColor = '#22d3ee';
+    ov.style.background = 'rgba(34,211,238,0.08)';
+  };
+
+  window.__t3DesignCleanup = function() {
+    document.removeEventListener('mousemove', onMouseMove, true);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+    if (ov.parentNode) ov.remove();
+    if (lb.parentNode) lb.remove();
+    sel = null;
+    hov = null;
+    delete window.__t3DesignDeselect;
+    delete window.__t3DesignCleanup;
+  };
+})()`;
+
 // ── Toolbar ─────────────────────────────────────────────────────────────
 
 interface OmniboxSuggestion {
@@ -777,6 +912,8 @@ const BrowserToolbar = memo(function BrowserToolbar({
   onClearCookies,
   onClearCache,
   onOpenDevTools,
+  designMode,
+  onToggleDesignMode,
 }: {
   url: string;
   isFavorite: boolean;
@@ -795,6 +932,8 @@ const BrowserToolbar = memo(function BrowserToolbar({
   onClearCookies: () => void;
   onClearCache: () => void;
   onOpenDevTools: () => void;
+  designMode: boolean;
+  onToggleDesignMode: () => void;
 }) {
   const [inputValue, setInputValue] = useState(url);
   const [omniboxOpen, setOmniboxOpen] = useState(false);
@@ -1053,6 +1192,36 @@ const BrowserToolbar = memo(function BrowserToolbar({
           <TooltipPopup side="bottom">Open DevTools</TooltipPopup>
         </Tooltip>
       )}
+      {isElectron && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className={cn(
+                  "flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors",
+                  designMode
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )}
+                onClick={onToggleDesignMode}
+                aria-label="Toggle design mode"
+              >
+                <PencilIcon className="size-3" />
+                {designMode && (
+                  <>
+                    <span className="text-[11px] font-medium">Design</span>
+                    <XIcon className="size-2.5" />
+                  </>
+                )}
+              </button>
+            }
+          />
+          <TooltipPopup side="bottom">
+            {designMode ? "Exit design mode" : "Design mode"}
+          </TooltipPopup>
+        </Tooltip>
+      )}
       <Menu>
         <MenuTrigger
           render={
@@ -1285,6 +1454,84 @@ function isWebview(
   return el !== null && (el as HTMLElement).tagName?.toLowerCase() === "webview";
 }
 
+// ── Design Mode Popover ─────────────────────────────────────────────────
+
+function DesignModePopover({
+  element,
+  onSubmit,
+  onAddToChat,
+  onDismiss,
+}: {
+  element: DesignModeElement;
+  onSubmit: (description: string, element: DesignModeElement) => void;
+  onAddToChat: (element: DesignModeElement) => void;
+  onDismiss: () => void;
+}) {
+  const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [element.selector]);
+
+  const handleSubmit = useCallback(() => {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) return;
+    onSubmit(trimmed, element);
+    setInput("");
+  }, [input, onSubmit, element]);
+
+  const handleAddToChat = useCallback(() => {
+    onAddToChat(element);
+    setInput("");
+  }, [onAddToChat, element]);
+
+  // Position below the selected element, clamped to container bounds
+  const top = element.rect.bottom + 8;
+  const left = Math.max(8, element.rect.left);
+
+  return (
+    <div
+      className="absolute z-50 flex items-center gap-1.5 rounded-lg border border-border bg-popover p-1.5 shadow-lg"
+      style={{ top, left, maxWidth: 340, minWidth: 220 }}
+    >
+      <input
+        ref={inputRef}
+        type="text"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            handleSubmit();
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onDismiss();
+          }
+          // ⌘+L or Ctrl+L → add element context to chat
+          if (e.key === "l" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            handleAddToChat();
+          }
+          e.stopPropagation();
+        }}
+        className="h-6 min-w-0 flex-1 bg-transparent px-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground"
+        placeholder="Describe the change or ⌘+L to add to chat"
+      />
+      <Button
+        variant="default"
+        size="icon"
+        className="size-5 shrink-0 rounded-full"
+        onClick={handleSubmit}
+        disabled={input.trim().length === 0}
+      >
+        <ArrowUpIcon className="size-3" />
+      </Button>
+    </div>
+  );
+}
+
 // ── Main BrowserPanel ───────────────────────────────────────────────────
 
 export type BrowserPanelLayout = "sidebar" | "sheet";
@@ -1324,6 +1571,8 @@ function BrowserPanel({ layout }: { layout: BrowserPanelLayout }) {
   const viewRefs = useRef<Record<string, ElectronWebviewElement | HTMLIFrameElement | null>>({});
   const activeTab = projectTabs.find((t) => t.id === projectActiveTabId) ?? null;
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [designMode, setDesignMode] = useState(false);
+  const [selectedElement, setSelectedElement] = useState<DesignModeElement | null>(null);
   const historyTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   /** Tracks the latest URL per tab so we can pair it with the real title when it arrives */
   const pendingUrlByTabRef = useRef<Record<string, string>>({});
@@ -1353,6 +1602,95 @@ function BrowserPanel({ layout }: { layout: BrowserPanelLayout }) {
       for (const timer of Object.values(timers)) clearTimeout(timer);
     };
   }, []);
+
+  // ── Design mode injection ──────────────────────────────────────────────
+  const deselectInWebview = useCallback(() => {
+    if (!projectActiveTabId) return;
+    const view = viewRefs.current[projectActiveTabId];
+    if (view && isWebview(view)) {
+      view.executeJavaScript("if(window.__t3DesignDeselect)window.__t3DesignDeselect()").catch(() => {});
+    }
+  }, [projectActiveTabId]);
+
+  useEffect(() => {
+    if (!designMode || !projectActiveTabId) {
+      setSelectedElement(null);
+      return;
+    }
+    const view = viewRefs.current[projectActiveTabId];
+    if (!view || !isWebview(view)) return;
+
+    view.executeJavaScript(DESIGN_MODE_INJECT_SCRIPT).catch(() => {});
+
+    const handleConsoleMessage = (event: Event) => {
+      const msg = (event as unknown as { message: string }).message;
+      if (typeof msg !== "string" || !msg.startsWith("__T3DESIGN__:")) return;
+      try {
+        const data = JSON.parse(msg.slice(13));
+        if (data.type === "select") {
+          setSelectedElement(data as DesignModeElement);
+        } else if (data.type === "deselect") {
+          setSelectedElement(null);
+        } else if (data.type === "exit") {
+          setDesignMode(false);
+        }
+      } catch {
+        /* ignore parse errors */
+      }
+    };
+
+    const handleDidNavigate = () => {
+      setSelectedElement(null);
+      view.executeJavaScript(DESIGN_MODE_INJECT_SCRIPT).catch(() => {});
+    };
+
+    view.addEventListener("console-message", handleConsoleMessage);
+    view.addEventListener("did-navigate", handleDidNavigate);
+
+    return () => {
+      view.removeEventListener("console-message", handleConsoleMessage);
+      view.removeEventListener("did-navigate", handleDidNavigate);
+      view
+        .executeJavaScript("if(window.__t3DesignCleanup)window.__t3DesignCleanup()")
+        .catch(() => {});
+      setSelectedElement(null);
+    };
+  }, [designMode, projectActiveTabId]);
+
+  const setPendingDesignAction = useSidePanelStore((s) => s.setPendingDesignAction);
+
+  const handleDesignSubmit = useCallback(
+    (description: string, element: DesignModeElement) => {
+      setPendingDesignAction({
+        selector: element.selector,
+        tagName: element.tagName,
+        outerHTML: element.outerHTML,
+        description,
+      });
+      setSelectedElement(null);
+      deselectInWebview();
+    },
+    [deselectInWebview, setPendingDesignAction],
+  );
+
+  const handleDesignAddToChat = useCallback(
+    (element: DesignModeElement) => {
+      setPendingDesignAction({
+        selector: element.selector,
+        tagName: element.tagName,
+        outerHTML: element.outerHTML,
+        description: "",
+      });
+      setSelectedElement(null);
+      deselectInWebview();
+    },
+    [deselectInWebview, setPendingDesignAction],
+  );
+
+  const handleDesignDismiss = useCallback(() => {
+    setSelectedElement(null);
+    deselectInWebview();
+  }, [deselectInWebview]);
 
   const handleNavigate = useCallback(
     (url: string) => {
@@ -1507,6 +1845,8 @@ function BrowserPanel({ layout }: { layout: BrowserPanelLayout }) {
         onClearCookies={() => {}}
         onClearCache={() => {}}
         onOpenDevTools={handleOpenDevTools}
+        designMode={designMode}
+        onToggleDesignMode={() => setDesignMode((d) => !d)}
       />
       <div className="relative flex min-h-0 flex-1 flex-col">
         {historyOpen && (
@@ -1535,6 +1875,14 @@ function BrowserPanel({ layout }: { layout: BrowserPanelLayout }) {
           onTitleChange={handleTitleChange}
           onFaviconChange={handleFaviconChange}
         />
+        {designMode && selectedElement && (
+          <DesignModePopover
+            element={selectedElement}
+            onSubmit={handleDesignSubmit}
+            onAddToChat={handleDesignAddToChat}
+            onDismiss={handleDesignDismiss}
+          />
+        )}
       </div>
     </>
   );

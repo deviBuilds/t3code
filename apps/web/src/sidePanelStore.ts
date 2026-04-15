@@ -202,9 +202,20 @@ function updateProjectEditorInMap(
   return { ...stateMap, [projectId]: next };
 }
 
+export interface DesignModeAction {
+  selector: string;
+  tagName: string;
+  outerHTML: string;
+  description: string;
+}
+
 interface SidePanelStore extends SidePanelState {
   activeProjectId: string | null;
   setActiveProjectId: (projectId: string | null) => void;
+
+  pendingDesignAction: DesignModeAction | null;
+  setPendingDesignAction: (action: DesignModeAction) => void;
+  clearPendingDesignAction: () => void;
 
   toggle: () => void;
   setOpen: (open: boolean) => void;
@@ -253,6 +264,9 @@ export const useSidePanelStore = create<SidePanelStore>()(
       favoriteFolders: [],
       history: [],
       activeProjectId: null,
+      pendingDesignAction: null,
+      setPendingDesignAction: (action) => set({ pendingDesignAction: action }),
+      clearPendingDesignAction: () => set({ pendingDesignAction: null }),
 
       setActiveProjectId: (projectId) => {
         const s = get();
