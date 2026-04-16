@@ -1235,6 +1235,31 @@ export default function ChatView(props: ChatViewProps) {
   const sidePanelOpen = useSidePanelStore((s) => s.open);
   const toggleBrowserSurface = useWorkspaceStore((s) => s.toggleBrowserSurface);
   const toggleEditorSurface = useWorkspaceStore((s) => s.toggleEditorSurface);
+  const openBrowserSurface = useWorkspaceStore((s) => s.openBrowserSurface);
+  const openEditorSurface = useWorkspaceStore((s) => s.openEditorSurface);
+  const closePaneSurface = useWorkspaceStore((s) => s.closeSurface);
+  const focusPaneSurface = useWorkspaceStore((s) => s.focusSurface);
+  const workspaceSurfaces = useWorkspaceStore((s) => s.document.surfacesById);
+
+  const browserPanes = useMemo(() => {
+    const result: { surfaceId: string; label: string }[] = [];
+    for (const surface of Object.values(workspaceSurfaces)) {
+      if (surface.kind === "browser") {
+        result.push({ surfaceId: surface.id, label: `Browser ${result.length + 1}` });
+      }
+    }
+    return result;
+  }, [workspaceSurfaces]);
+
+  const editorPanes = useMemo(() => {
+    const result: { surfaceId: string; label: string }[] = [];
+    for (const surface of Object.values(workspaceSurfaces)) {
+      if (surface.kind === "editor") {
+        result.push({ surfaceId: surface.id, label: `Editor ${result.length + 1}` });
+      }
+    }
+    return result;
+  }, [workspaceSurfaces]);
 
   const onToggleDiff = useCallback(() => {
     if (!isServerThread) {
@@ -1283,6 +1308,22 @@ export default function ChatView(props: ChatViewProps) {
       projectId: activeThread.projectId,
     });
   }, [activeThread, toggleEditorSurface]);
+
+  const openNewBrowserPane = useCallback(() => {
+    if (!activeThread) return;
+    openBrowserSurface({
+      environmentId: activeThread.environmentId,
+      projectId: activeThread.projectId,
+    }, "split-right");
+  }, [activeThread, openBrowserSurface]);
+
+  const openNewEditorPane = useCallback(() => {
+    if (!activeThread) return;
+    openEditorSurface({
+      environmentId: activeThread.environmentId,
+      projectId: activeThread.projectId,
+    }, "split-right");
+  }, [activeThread, openEditorSurface]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3022,6 +3063,12 @@ export default function ChatView(props: ChatViewProps) {
           sidePanelOpen={sidePanelOpen}
           onToggleSidePanel={toggleSidePanel}
           onToggleEditor={toggleEditor}
+          browserPanes={browserPanes}
+          editorPanes={editorPanes}
+          onOpenNewBrowserPane={openNewBrowserPane}
+          onOpenNewEditorPane={openNewEditorPane}
+          onClosePaneSurface={closePaneSurface}
+          onFocusPaneSurface={focusPaneSurface}
         />
       </header>
 
