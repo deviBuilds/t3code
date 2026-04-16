@@ -32,12 +32,14 @@ export interface BrowserSurfaceInput {
   environmentId: EnvironmentId;
   projectId: string;
   initialUrl?: string;
+  label?: string;
 }
 
 export interface EditorSurfaceInput {
   environmentId: EnvironmentId;
   projectId: string;
   initialFilePath?: string;
+  label?: string;
 }
 
 export type WorkspaceSurfaceInstance =
@@ -361,9 +363,11 @@ export function browserSurfaceInput(
   environmentId: EnvironmentId,
   projectId: string,
   initialUrl?: string,
+  label?: string,
 ): BrowserSurfaceInput {
   const result: BrowserSurfaceInput = { environmentId, projectId };
   if (initialUrl !== undefined) result.initialUrl = initialUrl;
+  if (label !== undefined) result.label = label;
   return result;
 }
 
@@ -371,8 +375,10 @@ export function editorSurfaceInput(
   environmentId: EnvironmentId,
   projectId: string,
   initialFilePath?: string,
+  label?: string,
 ): EditorSurfaceInput {
   const result: EditorSurfaceInput = { environmentId, projectId };
   if (initialFilePath !== undefined) result.initialFilePath = initialFilePath;
+  if (label !== undefined) result.label = label;
   return result;
 }

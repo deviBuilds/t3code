@@ -1230,20 +1230,28 @@ function WorkspaceSurfaceTitle(props: { surface: WorkspaceSurfaceInstance }) {
   }
 
   if (props.surface.kind === "browser") {
+    const browserLabel = props.surface.input.label;
     return (
       <AttachedSurfaceTitle
         icon={<GlobeIcon className="size-3 shrink-0" />}
-        label="Browser"
+        surfaceId={props.surface.id}
+        surfaceKind="browser"
+        defaultLabel="Browser"
+        {...(browserLabel !== undefined ? { customLabel: browserLabel } : {})}
         environmentId={props.surface.input.environmentId}
       />
     );
   }
 
   if (props.surface.kind === "editor") {
+    const editorLabel = props.surface.input.label;
     return (
       <AttachedSurfaceTitle
         icon={<CodeXmlIcon className="size-3 shrink-0" />}
-        label="Editor"
+        surfaceId={props.surface.id}
+        surfaceKind="editor"
+        defaultLabel="Editor"
+        {...(editorLabel !== undefined ? { customLabel: editorLabel } : {})}
         environmentId={props.surface.input.environmentId}
       />
     );
@@ -1289,10 +1297,32 @@ function TerminalSurfaceTitle(props: {
 
 function AttachedSurfaceTitle(props: {
   icon: ReactNode;
-  label: string;
+  surfaceId: string;
+  surfaceKind: "browser" | "editor";
+  defaultLabel: string;
+  customLabel?: string;
   environmentId: string;
 }) {
   const document = useWorkspaceStore((s) => s.document);
+  const renameSurface = useWorkspaceStore((s) => s.renameSurface);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const numberedLabel = useMemo(() => {
+    if (props.customLabel) return props.customLabel;
+    let index = 0;
+    for (const surface of Object.values(document.surfacesById)) {
+      if (surface.kind === props.surfaceKind) {
+        index++;
+        if (surface.id === props.surfaceId) {
+          return `${props.defaultLabel} ${index}`;
+        }
+      }
+    }
+    return props.defaultLabel;
+  }, [document.surfacesById, props.customLabel, props.surfaceKind, props.surfaceId, props.defaultLabel]);
+
   const threadRef = useMemo(() => {
     for (const surface of Object.values(document.surfacesById)) {
       if (
@@ -1311,13 +1341,59 @@ function AttachedSurfaceTitle(props: {
   );
   const threadLabel = thread?.title ?? threadRef?.threadId;
 
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditValue(numberedLabel);
+    setIsEditing(true);
+  }, [numberedLabel]);
+
+  const commitRename = useCallback(() => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== numberedLabel) {
+      renameSurface(props.surfaceId, trimmed);
+    }
+    setIsEditing(false);
+  }, [editValue, numberedLabel, renameSurface, props.surfaceId]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commitRename();
+      } else if (e.key === "Escape") {
+        setIsEditing(false);
+      }
+    },
+    [commitRename],
+  );
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
   return (
     <span className="inline-flex items-center gap-1">
       {props.icon}
-      <span className="truncate">{props.label}</span>
+      {isEditing ? (
+        <input
+          ref={inputRef}
+          className="min-w-[3rem] max-w-[10rem] truncate border-b border-primary bg-transparent text-xs outline-none"
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={handleKeyDown}
+        />
+      ) : (
+        <span className="truncate" onDoubleClick={handleDoubleClick}>
+          {numberedLabel}
+        </span>
+      )}
       {threadLabel && (
         <>
-          <span className="text-muted-foreground/60">·</span>
+          <span className="text-muted-foreground/60">&middot;</span>
           <span className="truncate text-muted-foreground">{threadLabel}</span>
         </>
       )}

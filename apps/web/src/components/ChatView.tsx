@@ -1245,7 +1245,10 @@ export default function ChatView(props: ChatViewProps) {
     const result: { surfaceId: string; label: string }[] = [];
     for (const surface of Object.values(workspaceSurfaces)) {
       if (surface.kind === "browser") {
-        result.push({ surfaceId: surface.id, label: `Browser ${result.length + 1}` });
+        result.push({
+          surfaceId: surface.id,
+          label: surface.input.label ?? `Browser ${result.length + 1}`,
+        });
       }
     }
     return result;
@@ -1255,7 +1258,10 @@ export default function ChatView(props: ChatViewProps) {
     const result: { surfaceId: string; label: string }[] = [];
     for (const surface of Object.values(workspaceSurfaces)) {
       if (surface.kind === "editor") {
-        result.push({ surfaceId: surface.id, label: `Editor ${result.length + 1}` });
+        result.push({
+          surfaceId: surface.id,
+          label: surface.input.label ?? `Editor ${result.length + 1}`,
+        });
       }
     }
     return result;

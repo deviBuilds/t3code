@@ -1584,10 +1584,16 @@ function BrowserPanel({ layout, storeKey }: { layout: BrowserPanelLayout; storeK
   const rawNavigateTab = useSidePanelStore((s) => s.navigateTab);
   const rawUpdateTabTitle = useSidePanelStore((s) => s.updateTabTitle);
   const rawUpdateTabFavicon = useSidePanelStore((s) => s.updateTabFavicon);
+  const rawAddTab = useSidePanelStore((s) => s.addTab);
+  const rawCloseTab = useSidePanelStore((s) => s.closeTab);
+  const rawSetActiveTab = useSidePanelStore((s) => s.setActiveTab);
   // Scoped wrappers: set activeProjectId before each action
   const navigateTab = useCallback((...args: Parameters<typeof rawNavigateTab>) => { scopeStore(); rawNavigateTab(...args); }, [scopeStore, rawNavigateTab]);
   const updateTabTitle = useCallback((...args: Parameters<typeof rawUpdateTabTitle>) => { scopeStore(); rawUpdateTabTitle(...args); }, [scopeStore, rawUpdateTabTitle]);
   const updateTabFavicon = useCallback((...args: Parameters<typeof rawUpdateTabFavicon>) => { scopeStore(); rawUpdateTabFavicon(...args); }, [scopeStore, rawUpdateTabFavicon]);
+  const addTab = useCallback((...args: Parameters<typeof rawAddTab>) => { scopeStore(); rawAddTab(...args); }, [scopeStore, rawAddTab]);
+  const closeTab = useCallback((...args: Parameters<typeof rawCloseTab>) => { scopeStore(); rawCloseTab(...args); }, [scopeStore, rawCloseTab]);
+  const setActiveTab = useCallback((...args: Parameters<typeof rawSetActiveTab>) => { scopeStore(); rawSetActiveTab(...args); }, [scopeStore, rawSetActiveTab]);
   const addHistoryEntry = useSidePanelStore((s) => s.addHistoryEntry);
   const updateHistoryEntryTitle = useSidePanelStore((s) => s.updateHistoryEntryTitle);
   const removeHistoryEntry = useSidePanelStore((s) => s.removeHistoryEntry);
@@ -1603,6 +1609,17 @@ function BrowserPanel({ layout, storeKey }: { layout: BrowserPanelLayout; storeK
   const moveFavoriteToFolder = useSidePanelStore((s) => s.moveFavoriteToFolder);
   const moveHistoryToFavorites = useSidePanelStore((s) => s.moveHistoryToFavorites);
   const removeFavoriteFromFolder = useSidePanelStore((s) => s.removeFavoriteFromFolder);
+
+  // Ensure the scoped store slot has at least one tab on mount
+  useEffect(() => {
+    if (!storeKey) return;
+    const state = useSidePanelStore.getState();
+    const slot = state.browserStateByProjectId[storeKey];
+    if (!slot || slot.tabs.length === 0) {
+      scopeStore();
+      rawAddTab();
+    }
+  }, [storeKey, scopeStore, rawAddTab]);
 
   const viewRefs = useRef<Record<string, ElectronWebviewElement | HTMLIFrameElement | null>>({});
   const activeTab = projectTabs.find((t) => t.id === projectActiveTabId) ?? null;
@@ -1859,6 +1876,15 @@ function BrowserPanel({ layout, storeKey }: { layout: BrowserPanelLayout; storeK
 
   return (
     <>
+      <div className="flex items-center border-b border-border bg-card/60">
+        <BrowserTabBar
+          tabs={projectTabs}
+          activeTabId={projectActiveTabId}
+          onActivate={setActiveTab}
+          onClose={closeTab}
+          onAddTab={() => addTab()}
+        />
+      </div>
       <BrowserToolbar
         url={
           activeTab?.url && activeTab.url !== "about:blank" && activeTab.url !== "[object Object]"

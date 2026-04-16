@@ -279,6 +279,7 @@ export interface WorkspaceStoreState {
   toggleEditorSurface: (input: EditorSurfaceInput) => void;
   focusSurface: (surfaceId: string) => void;
   setMobileActiveWindow: (windowId: string) => void;
+  renameSurface: (surfaceId: string, label: string) => void;
   resetWorkspace: () => void;
   // Legacy compat (kept for consumers that call setSplitNodeSizes)
   setSplitNodeSizes: (nodeId: string, sizes: number[]) => void;
@@ -728,6 +729,27 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
         ...current,
         focusedWindowId: windowId,
         mobileActiveWindowId: windowId,
+      }),
+    );
+  },
+
+  renameSurface: (surfaceId, label) => {
+    const current = get().document;
+    const surface = current.surfacesById[surfaceId];
+    if (!surface || (surface.kind !== "browser" && surface.kind !== "editor")) {
+      return;
+    }
+    const updatedSurface = {
+      ...surface,
+      input: { ...surface.input, label },
+    } as WorkspaceSurfaceInstance;
+    set(
+      setDocumentState({
+        ...current,
+        surfacesById: {
+          ...current.surfacesById,
+          [surfaceId]: updatedSurface,
+        },
       }),
     );
   },
