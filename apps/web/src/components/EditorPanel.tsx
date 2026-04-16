@@ -4,6 +4,7 @@ import { SearchIcon } from "lucide-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { fileTreeQueryOptions } from "~/lib/editorReactQuery";
 import {
+  type EditorTab,
   selectProjectEditorTabs,
   selectProjectActiveEditorTabId,
   useSidePanelStore,
@@ -12,17 +13,47 @@ import { FileTree } from "./editor/FileTree";
 
 const MonacoEditor = lazy(() => import("./editor/MonacoEditor"));
 
+// ── Editor state lookup by key ─────────────────────────────────────────
+
+const EMPTY_EDITOR_STATE = Object.freeze({ tabs: [] as EditorTab[], activeTabId: null });
+function getEditorByKey(
+  stateMap: Record<string, { tabs: EditorTab[]; activeTabId: string | null }>,
+  key: string,
+): { tabs: EditorTab[]; activeTabId: string | null } {
+  return stateMap[key] ?? EMPTY_EDITOR_STATE;
+}
+
 const EditorPanel = memo(function EditorPanel({
   environmentId,
   cwd,
+  storeKey,
 }: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
+  storeKey?: string;
 }) {
-  const editorTabs = useSidePanelStore(selectProjectEditorTabs);
-  const activeEditorTabId = useSidePanelStore(selectProjectActiveEditorTabId);
-  const openEditorFile = useSidePanelStore((s) => s.openEditorFile);
-  const pinEditorTab = useSidePanelStore((s) => s.pinEditorTab);
+  const scopeStore = useCallback(() => {
+    if (storeKey) useSidePanelStore.setState({ activeProjectId: storeKey });
+  }, [storeKey]);
+
+  const selectTabs = useCallback(
+    storeKey
+      ? (s: Parameters<typeof selectProjectEditorTabs>[0]) => getEditorByKey(s.editorStateByProjectId, storeKey).tabs
+      : selectProjectEditorTabs,
+    [storeKey],
+  );
+  const selectActiveTabId = useCallback(
+    storeKey
+      ? (s: Parameters<typeof selectProjectActiveEditorTabId>[0]) => getEditorByKey(s.editorStateByProjectId, storeKey).activeTabId
+      : selectProjectActiveEditorTabId,
+    [storeKey],
+  );
+  const editorTabs = useSidePanelStore(selectTabs);
+  const activeEditorTabId = useSidePanelStore(selectActiveTabId);
+  const rawOpenEditorFile = useSidePanelStore((s) => s.openEditorFile);
+  const rawPinEditorTab = useSidePanelStore((s) => s.pinEditorTab);
+  const openEditorFile = useCallback((path: string) => { scopeStore(); rawOpenEditorFile(path); }, [scopeStore, rawOpenEditorFile]);
+  const pinEditorTab = useCallback((tabId: string) => { scopeStore(); rawPinEditorTab(tabId); }, [scopeStore, rawPinEditorTab]);
 
   const fileTreeQuery = useQuery(fileTreeQueryOptions({ environmentId, cwd }));
   const entries = fileTreeQuery.data?.entries ?? [];
@@ -47,14 +78,13 @@ const EditorPanel = memo(function EditorPanel({
   const handleFileDoubleClick = useCallback(
     (relativePath: string) => {
       openEditorFile(relativePath);
-      const state = useSidePanelStore.getState();
-      const projectId = state.activeProjectId;
-      if (!projectId) return;
-      const editorState = state.editorStateByProjectId[projectId];
+      const stateKey = storeKey ?? useSidePanelStore.getState().activeProjectId;
+      if (!stateKey) return;
+      const editorState = useSidePanelStore.getState().editorStateByProjectId[stateKey];
       const tab = editorState?.tabs.find((t) => t.relativePath === relativePath);
       if (tab) pinEditorTab(tab.id);
     },
-    [openEditorFile, pinEditorTab],
+    [openEditorFile, pinEditorTab, storeKey],
   );
 
   return (

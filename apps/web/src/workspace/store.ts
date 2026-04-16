@@ -169,6 +169,25 @@ function terminalSurfaceInputForThread(options: {
   };
 }
 
+// ── Lookup Helpers ────────────────────────────────────────────────────
+
+/** Find the first server-scoped thread ref in the document matching the given environment. */
+function findThreadRefInDocument(
+  doc: WorkspaceDocumentNiri,
+  environmentId: string,
+): TerminalSurfaceInput["threadRef"] | null {
+  for (const surface of Object.values(doc.surfacesById)) {
+    if (
+      surface.kind === "thread" &&
+      surface.input.scope === "server" &&
+      surface.input.threadRef.environmentId === environmentId
+    ) {
+      return surface.input.threadRef;
+    }
+  }
+  return null;
+}
+
 // ── First Window Helper ────────────────────────────────────────────────
 
 function firstWindowId(doc: WorkspaceDocumentNiri): string | null {

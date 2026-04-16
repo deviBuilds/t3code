@@ -11,6 +11,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { createThreadSelectorByRef } from "../../storeSelectors";
 import { useStore } from "../../store";
@@ -43,11 +44,7 @@ import {
 } from "../../workspace/types";
 import { NIRI_MIN_COLUMN_WIDTH, NIRI_MAX_COLUMN_WIDTH } from "../../workspace/niriLayout";
 import { useEditorCwd } from "../../hooks/useEditorCwd";
-import {
-  selectProjectEditorTabs,
-  selectProjectActiveEditorTabId,
-  useSidePanelStore,
-} from "../../sidePanelStore";
+import { useSidePanelStore } from "../../sidePanelStore";
 import { EditorTabBar } from "../editor/EditorTabBar";
 
 const BrowserPanel = lazy(() => import("../BrowserPanel"));
@@ -1113,6 +1110,7 @@ const WorkspaceSurfaceView = memo(function WorkspaceSurfaceView(props: {
   if (props.surface.kind === "browser") {
     return (
       <WorkspaceBrowserSurface
+        surfaceId={props.surface.id}
         projectId={props.surface.input.projectId}
       />
     );
@@ -1121,6 +1119,7 @@ const WorkspaceSurfaceView = memo(function WorkspaceSurfaceView(props: {
   if (props.surface.kind === "editor") {
     return (
       <WorkspaceEditorSurface
+        surfaceId={props.surface.id}
         environmentId={props.surface.input.environmentId}
         projectId={props.surface.input.projectId}
       />
@@ -1133,20 +1132,24 @@ const WorkspaceSurfaceView = memo(function WorkspaceSurfaceView(props: {
 // ── Browser / Editor Surface Wrappers ──────────────────────────────────
 
 const WorkspaceBrowserSurface = memo(function WorkspaceBrowserSurface(props: {
+  surfaceId: string;
   projectId: string;
 }) {
   const store = useSidePanelStore;
   const addTab = store((s) => s.addTab);
 
-  // Ensure projectId is set and at least one browser tab exists
+  // Use surfaceId as the store key so each browser surface has independent tabs
+  const storeKey = `ws-browser:${props.surfaceId}`;
+
   useEffect(() => {
+    // Temporarily set activeProjectId to our key so addTab writes to the right slot
+    store.setState({ activeProjectId: storeKey });
     const s = store.getState();
-    store.setState({ activeProjectId: props.projectId });
-    const projectState = s.browserStateByProjectId[props.projectId];
+    const projectState = s.browserStateByProjectId[storeKey];
     if (!projectState || projectState.tabs.length === 0) {
       addTab();
     }
-  }, [props.projectId, addTab]);
+  }, [storeKey, addTab]);
 
   return (
     <div className="flex h-full w-full min-h-0 flex-col">
@@ -1157,28 +1160,41 @@ const WorkspaceBrowserSurface = memo(function WorkspaceBrowserSurface(props: {
           </div>
         }
       >
-        <BrowserPanel layout="sidebar" />
+        <BrowserPanel layout="sidebar" storeKey={storeKey} />
       </Suspense>
     </div>
   );
 });
 
+const EMPTY_EDITOR_TABS: import("../../sidePanelStore").EditorTab[] = [];
+
 const WorkspaceEditorSurface = memo(function WorkspaceEditorSurface(props: {
+  surfaceId: string;
   environmentId: string;
   projectId: string;
 }) {
-  const setActiveProjectId = useSidePanelStore((s) => s.setActiveProjectId);
-  const editorTabs = useSidePanelStore(selectProjectEditorTabs);
-  const activeEditorTabId = useSidePanelStore(selectProjectActiveEditorTabId);
-  const setActiveEditorTab = useSidePanelStore((s) => s.setActiveEditorTab);
-  const closeEditorTab = useSidePanelStore((s) => s.closeEditorTab);
-  const pinEditorTab = useSidePanelStore((s) => s.pinEditorTab);
+  const store = useSidePanelStore;
+  const storeKey = `ws-editor:${props.surfaceId}`;
+
+  const scopeStore = useCallback(() => {
+    store.setState({ activeProjectId: storeKey });
+  }, [storeKey]);
+
+  const editorTabs = store(
+    (s) => s.editorStateByProjectId[storeKey]?.tabs ?? EMPTY_EDITOR_TABS,
+  );
+  const activeEditorTabId = store(
+    (s) => s.editorStateByProjectId[storeKey]?.activeTabId ?? null,
+  );
+  const rawSetActiveEditorTab = store((s) => s.setActiveEditorTab);
+  const rawCloseEditorTab = store((s) => s.closeEditorTab);
+  const rawPinEditorTab = store((s) => s.pinEditorTab);
+  const setActiveEditorTab = useCallback((tabId: string) => { scopeStore(); rawSetActiveEditorTab(tabId); }, [scopeStore, rawSetActiveEditorTab]);
+  const closeEditorTab = useCallback((tabId: string) => { scopeStore(); rawCloseEditorTab(tabId); }, [scopeStore, rawCloseEditorTab]);
+  const pinEditorTab = useCallback((tabId: string) => { scopeStore(); rawPinEditorTab(tabId); }, [scopeStore, rawPinEditorTab]);
+
   const envId = props.environmentId as import("@t3tools/contracts").EnvironmentId;
   const cwd = useEditorCwd(envId, props.projectId, null);
-
-  useEffect(() => {
-    setActiveProjectId(props.projectId);
-  }, [props.projectId, setActiveProjectId]);
 
   return (
     <div className="flex h-full w-full min-h-0 flex-col">
@@ -1200,7 +1216,7 @@ const WorkspaceEditorSurface = memo(function WorkspaceEditorSurface(props: {
           </div>
         }
       >
-        <EditorPanel environmentId={envId} cwd={cwd} />
+        <EditorPanel environmentId={envId} cwd={cwd} storeKey={storeKey} />
       </Suspense>
     </div>
   );
@@ -1215,19 +1231,21 @@ function WorkspaceSurfaceTitle(props: { surface: WorkspaceSurfaceInstance }) {
 
   if (props.surface.kind === "browser") {
     return (
-      <span className="inline-flex items-center gap-1">
-        <GlobeIcon className="size-3 shrink-0" />
-        <span className="truncate">Browser</span>
-      </span>
+      <AttachedSurfaceTitle
+        icon={<GlobeIcon className="size-3 shrink-0" />}
+        label="Browser"
+        environmentId={props.surface.input.environmentId}
+      />
     );
   }
 
   if (props.surface.kind === "editor") {
     return (
-      <span className="inline-flex items-center gap-1">
-        <CodeXmlIcon className="size-3 shrink-0" />
-        <span className="truncate">Editor</span>
-      </span>
+      <AttachedSurfaceTitle
+        icon={<CodeXmlIcon className="size-3 shrink-0" />}
+        label="Editor"
+        environmentId={props.surface.input.environmentId}
+      />
     );
   }
 
@@ -1265,6 +1283,44 @@ function TerminalSurfaceTitle(props: {
     <span className="inline-flex items-center gap-1">
       <TerminalSquareIcon className="size-3 shrink-0" />
       <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
+function AttachedSurfaceTitle(props: {
+  icon: ReactNode;
+  label: string;
+  environmentId: string;
+}) {
+  const document = useWorkspaceStore((s) => s.document);
+  const threadRef = useMemo(() => {
+    for (const surface of Object.values(document.surfacesById)) {
+      if (
+        surface.kind === "thread" &&
+        surface.input.scope === "server" &&
+        surface.input.threadRef.environmentId === props.environmentId
+      ) {
+        return surface.input.threadRef;
+      }
+    }
+    return null;
+  }, [document.surfacesById, props.environmentId]);
+
+  const thread = useStore(
+    useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]),
+  );
+  const threadLabel = thread?.title ?? threadRef?.threadId;
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {props.icon}
+      <span className="truncate">{props.label}</span>
+      {threadLabel && (
+        <>
+          <span className="text-muted-foreground/60">·</span>
+          <span className="truncate text-muted-foreground">{threadLabel}</span>
+        </>
+      )}
     </span>
   );
 }

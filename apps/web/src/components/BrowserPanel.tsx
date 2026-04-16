@@ -60,6 +60,16 @@ import {
 } from "~/sidePanelStore";
 import { isElectron } from "~/env";
 
+// ── Browser state lookup by key ────────────────────────────────────────
+
+const EMPTY_BROWSER_STATE = Object.freeze({ tabs: [] as BrowserTab[], activeTabId: null });
+function getProjectBrowserByKey(
+  stateMap: Record<string, { tabs: BrowserTab[]; activeTabId: string | null }>,
+  key: string,
+): { tabs: BrowserTab[]; activeTabId: string | null } {
+  return stateMap[key] ?? EMPTY_BROWSER_STATE;
+}
+
 // ── Electron webview type augmentation ──────────────────────────────────
 
 interface ElectronWebviewElement extends HTMLElement {
@@ -1537,21 +1547,47 @@ function DesignModePopover({
 export type BrowserPanelLayout = "sidebar" | "sheet";
 const HISTORY_DEBOUNCE_MS = 1500;
 
-function BrowserPanel({ layout }: { layout: BrowserPanelLayout }) {
-  const projectTabs = useSidePanelStore(selectProjectTabs);
-  const projectActiveTabId = useSidePanelStore(selectProjectActiveTabId);
+function BrowserPanel({ layout, storeKey }: { layout: BrowserPanelLayout; storeKey?: string }) {
+  // When storeKey is provided, scope all reads/writes to that key.
+  // Set activeProjectId synchronously before any store action so it targets the right slot.
+  const scopeStore = useCallback(() => {
+    if (storeKey) useSidePanelStore.setState({ activeProjectId: storeKey });
+  }, [storeKey]);
+
+  const selectTabs = useCallback(
+    storeKey
+      ? (s: Parameters<typeof selectProjectTabs>[0]) => getProjectBrowserByKey(s.browserStateByProjectId, storeKey).tabs
+      : selectProjectTabs,
+    [storeKey],
+  );
+  const selectActiveTabId = useCallback(
+    storeKey
+      ? (s: Parameters<typeof selectProjectActiveTabId>[0]) => getProjectBrowserByKey(s.browserStateByProjectId, storeKey).activeTabId
+      : selectProjectActiveTabId,
+    [storeKey],
+  );
+  const projectTabs = useSidePanelStore(selectTabs);
+  const projectActiveTabId = useSidePanelStore(selectActiveTabId);
   const browserStateByProjectId = useSidePanelStore((s) => s.browserStateByProjectId);
   const allTabs = useMemo(() => {
+    if (storeKey) {
+      // Only return tabs for this surface's store slot
+      return getProjectBrowserByKey(browserStateByProjectId, storeKey).tabs;
+    }
     const result: BrowserTab[] = [];
     for (const pbs of Object.values(browserStateByProjectId)) {
       for (const tab of pbs.tabs) result.push(tab);
     }
     return result;
-  }, [browserStateByProjectId]);
+  }, [browserStateByProjectId, storeKey]);
 
-  const navigateTab = useSidePanelStore((s) => s.navigateTab);
-  const updateTabTitle = useSidePanelStore((s) => s.updateTabTitle);
-  const updateTabFavicon = useSidePanelStore((s) => s.updateTabFavicon);
+  const rawNavigateTab = useSidePanelStore((s) => s.navigateTab);
+  const rawUpdateTabTitle = useSidePanelStore((s) => s.updateTabTitle);
+  const rawUpdateTabFavicon = useSidePanelStore((s) => s.updateTabFavicon);
+  // Scoped wrappers: set activeProjectId before each action
+  const navigateTab = useCallback((...args: Parameters<typeof rawNavigateTab>) => { scopeStore(); rawNavigateTab(...args); }, [scopeStore, rawNavigateTab]);
+  const updateTabTitle = useCallback((...args: Parameters<typeof rawUpdateTabTitle>) => { scopeStore(); rawUpdateTabTitle(...args); }, [scopeStore, rawUpdateTabTitle]);
+  const updateTabFavicon = useCallback((...args: Parameters<typeof rawUpdateTabFavicon>) => { scopeStore(); rawUpdateTabFavicon(...args); }, [scopeStore, rawUpdateTabFavicon]);
   const addHistoryEntry = useSidePanelStore((s) => s.addHistoryEntry);
   const updateHistoryEntryTitle = useSidePanelStore((s) => s.updateHistoryEntryTitle);
   const removeHistoryEntry = useSidePanelStore((s) => s.removeHistoryEntry);

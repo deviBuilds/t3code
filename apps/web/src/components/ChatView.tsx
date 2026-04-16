@@ -1201,7 +1201,7 @@ export default function ChatView(props: ChatViewProps) {
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const keybindings = useServerKeybindings();
   const availableEditors = useServerAvailableEditors();
-  const { executeWorkspaceCommand } = useWorkspaceCommandExecutor();
+  const { executeWorkspaceCommand, focusedThreadRef: workspaceFocusedThreadRef } = useWorkspaceCommandExecutor();
   const activeProviderStatus = useMemo(
     () => providerStatuses.find((status) => status.provider === selectedProvider) ?? null,
     [selectedProvider, providerStatuses],
@@ -1383,21 +1383,24 @@ export default function ChatView(props: ChatViewProps) {
     composerDraftTarget,
   ]);
   const toggleTerminalVisibility = useCallback(() => {
-    if (!activeThreadRef) return;
-    toggleTerminalSurfaceForThread(activeThreadRef);
-  }, [activeThreadRef, toggleTerminalSurfaceForThread]);
+    const targetRef = workspaceFocusedThreadRef ?? activeThreadRef;
+    if (!targetRef) return;
+    toggleTerminalSurfaceForThread(targetRef);
+  }, [workspaceFocusedThreadRef, activeThreadRef, toggleTerminalSurfaceForThread]);
   const splitTerminal = useCallback(() => {
-    if (!activeThreadRef || hasReachedSplitLimit) return;
+    const targetRef = workspaceFocusedThreadRef ?? activeThreadRef;
+    if (!targetRef || hasReachedSplitLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
-    storeSplitTerminal(activeThreadRef, terminalId);
-    ensureTerminalSurfaceForThread(activeThreadRef);
-  }, [activeThreadRef, ensureTerminalSurfaceForThread, hasReachedSplitLimit, storeSplitTerminal]);
+    storeSplitTerminal(targetRef, terminalId);
+    ensureTerminalSurfaceForThread(targetRef);
+  }, [workspaceFocusedThreadRef, activeThreadRef, ensureTerminalSurfaceForThread, hasReachedSplitLimit, storeSplitTerminal]);
   const createNewTerminal = useCallback(() => {
-    if (!activeThreadRef) return;
+    const targetRef = workspaceFocusedThreadRef ?? activeThreadRef;
+    if (!targetRef) return;
     const terminalId = `terminal-${randomUUID()}`;
-    storeNewTerminal(activeThreadRef, terminalId);
-    ensureTerminalSurfaceForThread(activeThreadRef);
-  }, [activeThreadRef, ensureTerminalSurfaceForThread, storeNewTerminal]);
+    storeNewTerminal(targetRef, terminalId);
+    ensureTerminalSurfaceForThread(targetRef);
+  }, [workspaceFocusedThreadRef, activeThreadRef, ensureTerminalSurfaceForThread, storeNewTerminal]);
   const closeTerminal = useCallback(
     (terminalId: string) => {
       const api = readEnvironmentApi(environmentId);
@@ -2016,8 +2019,9 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "terminal.split") {
         event.preventDefault();
         event.stopPropagation();
-        if (!terminalSurfaceOpen && activeThreadRef) {
-          ensureTerminalSurfaceForThread(activeThreadRef);
+        const splitTargetRef = workspaceFocusedThreadRef ?? activeThreadRef;
+        if (!terminalSurfaceOpen && splitTargetRef) {
+          ensureTerminalSurfaceForThread(splitTargetRef);
         }
         splitTerminal();
         return;
@@ -2073,6 +2077,7 @@ export default function ChatView(props: ChatViewProps) {
     onToggleDiff,
     terminalSurfaceOpen,
     toggleTerminalVisibility,
+    workspaceFocusedThreadRef,
   ]);
 
   const onRevertToTurnCount = useCallback(

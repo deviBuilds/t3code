@@ -162,7 +162,8 @@ const MonacoEditorComponent = memo(function MonacoEditorComponent({
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       editorRef.current?.dispose();
       editorRef.current = null;
-      for (const model of models.values()) model.dispose();
+      // Don't dispose models — they live in Monaco's global registry and
+      // may be shared across multiple editor instances.
       models.clear();
       setEditorReady(false);
     };
@@ -195,8 +196,14 @@ const MonacoEditorComponent = memo(function MonacoEditorComponent({
       let model = modelsRef.current.get(relativePath);
 
       if (!model || model.isDisposed()) {
-        // Monaco auto-detects language from the URI file extension
-        model = monaco.editor.createModel(fileQuery.data.contents, undefined, uri);
+        // Check if a global model already exists (shared across editor instances)
+        const existing = monaco.editor.getModel(uri);
+        if (existing) {
+          model = existing;
+        } else {
+          // Monaco auto-detects language from the URI file extension
+          model = monaco.editor.createModel(fileQuery.data.contents, undefined, uri);
+        }
         modelsRef.current.set(relativePath, model);
       } else if (model.getValue() !== fileQuery.data.contents) {
         model.setValue(fileQuery.data.contents);
